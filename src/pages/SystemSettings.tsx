@@ -11,13 +11,16 @@ import {
   faSun, 
   faMoon, 
   faDesktop, 
-  faChevronRight
+  faChevronRight,
+  faFolder
 } from '@fortawesome/free-solid-svg-icons'
 import { faGithub } from '@fortawesome/free-brands-svg-icons'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useSettings } from '../context/SettingsContext'
 import { useLog } from '../context/LogContext'
+import ProxySettingsModal from '../components/ProxySettingsModal'
+import { ProxySettings } from '../utils/config'
 
 interface NodePassStatus {
   installed: boolean
@@ -51,7 +54,7 @@ interface DownloadProgress {
 
 // 设置项组件
 const SettingItem: React.FC<{
-  label: string
+  label: string | React.ReactNode
   children: React.ReactNode
   description?: string
 }> = ({ label, children, description }) => (
@@ -89,6 +92,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
   const [showDownloadModal, setShowDownloadModal] = useState(false)
   const [checkingStatus, setCheckingStatus] = useState(false)
   const [appVersion, setAppVersion] = useState<string>('0.0.1')
+  const [showProxyModal, setShowProxyModal] = useState(false)
   
   // 从Context获取设置和日志
   const { settings, updateSettings, theme, setTheme, isTopNav, setIsTopNav } = useSettings()
@@ -159,6 +163,8 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
       addLog('info', '开始获取 NodePass 最新版本信息', 'SystemSettings')
       const release = await invoke<GitHubRelease>('get_latest_release')
       setLatestRelease(release)
+      // 重置下载进度状态
+      setDownloadProgress(null)
       setShowDownloadModal(true)
       addLog('info', `获取到最新版本: ${release.tag_name}`, 'SystemSettings')
     } catch (error) {
@@ -178,14 +184,16 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
       
       console.log('调用下载函数，参数:', {
         downloadUrl: asset.browser_download_url,
-        filename: asset.name
+        filename: asset.name,
+        proxySettings: settings.proxy
       })
       
       // 使用Promise包装invoke调用，确保错误被正确捕获
       const result = await new Promise((resolve, reject) => {
         invoke('download_nodepass', {
           downloadUrl: asset.browser_download_url,
-          filename: asset.name
+          filename: asset.name,
+          proxySettings: settings.proxy
         })
         .then(resolve)
         .catch(reject)
@@ -274,24 +282,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
     return anyWindowsAssets.length > 0 ? anyWindowsAssets[0] : null;
   }
 
-  // 测试网络连接
-  const testNetworkConnection = async () => {
-    try {
-      addLog('info', '开始测试网络连接', 'SystemSettings')
-      message.loading('正在测试网络连接...', 2)
-      
-      const result = await invoke<string>('test_network_connection', {
-        url: 'https://api.github.com/repos/yosebyte/nodepass/releases/latest'
-      })
-      
-      message.success(`网络测试成功: ${result}`)
-      addLog('info', `网络测试成功: ${result}`, 'SystemSettings')
-    } catch (error) {
-      const errorMsg = `网络测试失败: ${error}`
-      message.error(errorMsg)
-      addLog('error', errorMsg, 'SystemSettings')
-    }
-  }
+
 
   // 下载适合系统的包
   const downloadSystemAppropriate = () => {
@@ -317,6 +308,68 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
     }
   }
 
+  const handleProxySettingsSave = async (proxySettings: ProxySettings) => {
+    try {
+      await updateSettings({ proxy: proxySettings })
+      addLog('info', '代理设置已更新', 'SystemSettings')
+    } catch (error) {
+      console.error('保存代理设置失败:', error)
+      throw error
+    }
+  }
+
+  // 检查版本更新
+  const checkForUpdates = async () => {
+    if (!nodePassStatus?.installed || !nodePassStatus.version) {
+      message.warning('请先安装 NodePass 核心')
+      return
+    }
+
+    try {
+      message.loading('正在检查更新...', 1)
+      addLog('info', '开始检查 NodePass 版本更新', 'SystemSettings')
+      
+      const release = await invoke<GitHubRelease>('get_latest_release')
+      const currentVersion = nodePassStatus.version
+      const latestVersion = release.tag_name
+      
+      addLog('info', `当前版本: ${currentVersion}, 最新版本: ${latestVersion}`, 'SystemSettings')
+      
+      if (currentVersion === latestVersion) {
+        message.success('当前已是最新版本！')
+        addLog('info', '当前版本已是最新', 'SystemSettings')
+      } else {
+        setLatestRelease(release)
+        setDownloadProgress(null)
+        setShowDownloadModal(true)
+        addLog('info', `发现新版本: ${latestVersion}`, 'SystemSettings')
+      }
+    } catch (error) {
+      const errorMsg = `检查更新失败: ${error}`
+      message.error(errorMsg)
+      addLog('error', errorMsg, 'SystemSettings')
+    }
+  }
+
+  // 打开核心文件目录
+  const openCoreDirectory = async () => {
+    if (!nodePassStatus?.installed || !nodePassStatus.path) {
+      message.warning('未找到 NodePass 核心文件')
+      return
+    }
+
+    try {
+      const path = nodePassStatus.path
+      const directory = path.substring(0, path.lastIndexOf('\\'))
+      await invoke('open_directory', { path: directory })
+      addLog('info', `打开核心文件目录: ${directory}`, 'SystemSettings')
+    } catch (error) {
+      message.error('打开目录失败')
+      console.error('打开目录错误:', error)
+      addLog('error', `打开目录失败: ${error}`, 'SystemSettings')
+    }
+  }
+
   return (
     <div>
       <div ref={containerRef} style={{ position: 'relative' }}>
@@ -325,35 +378,50 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
           {/* NodePass 设置 */}
           <Card 
             title={
-              <Space>
-                <FontAwesomeIcon icon={faCog} />
-                <span>NodePass 核心</span>
-              </Space>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Space>
+                  <FontAwesomeIcon icon={faCog} />
+                  <span>NodePass 核心</span>
+                </Space>
+                <Button 
+                  icon={<FontAwesomeIcon icon={faSync} />} 
+                  onClick={checkNodePassStatus}
+                  loading={checkingStatus}
+                  size="small"
+                  type="text"
+                  title="刷新核心状态"
+                />
+              </div>
             }
             style={{ marginBottom: 24 }}
           >
             <div style={{ padding: '0 8px' }}>
               <SettingItem 
-                label="核心状态"
+                label={
+                  <Space>
+                    <span>核心状态</span>
+                    {nodePassStatus?.installed && (
+                      <Button 
+                        icon={<FontAwesomeIcon icon={faFolder} />} 
+                        onClick={openCoreDirectory}
+                        size="small"
+                        type="text"
+                        title="打开核心文件目录"
+                        style={{ color: '#666' }}
+                      />
+                    )}
+                  </Space>
+                }
                 description="NodePass 核心执行文件状态"
               >
                 <Space>
                   {nodePassStatus ? (
                     nodePassStatus.installed ? (
-                      // 已安装：显示版本号按钮，点击跳转到目录
+                      // 已安装：显示版本号按钮，点击检查更新
                       <Button 
                         type="text" 
                         size="small"
-                        onClick={async () => {
-                          try {
-                            const path = nodePassStatus.path!;
-                            const directory = path.substring(0, path.lastIndexOf('\\'));
-                            await invoke('open_directory', { path: directory });
-                          } catch (error) {
-                            message.error('打开目录失败');
-                            console.error('打开目录错误:', error);
-                          }
-                        }}
+                        onClick={checkForUpdates}
                         style={{ 
                           color: '#52c41a',
                           backgroundColor: '#f6ffed',
@@ -366,6 +434,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
                           height: 'auto',
                           lineHeight: '1.2'
                         }}
+                        title="点击检查更新"
                       >
                         {nodePassStatus.version || 'v?.?.?'}
                       </Button>
@@ -383,13 +452,6 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
                   ) : (
                     <Tag>检测中...</Tag>
                   )}
-                  <Button 
-                    icon={<FontAwesomeIcon icon={faSync} />} 
-                    onClick={checkNodePassStatus}
-                    loading={checkingStatus}
-                    size="small"
-                    type="text"
-                  />
                 </Space>
               </SettingItem>
 
@@ -417,16 +479,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
                 </Button>
               </SettingItem>
 
-              {nodePassStatus?.error && (
-                <div style={{ marginTop: 16 }}>
-                  <Alert
-                    type="error"
-                    message="检测错误"
-                    description={nodePassStatus.error}
-                    showIcon
-                  />
-                </div>
-              )}
+
             </div>
           </Card>
 
@@ -526,11 +579,10 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
               >
                 <Button 
                   type="text" 
-                  icon={<FontAwesomeIcon icon={faChevronRight} />}
                   size="small"
                   onClick={() => message.info('此功能正在开发中')}
                 >
-                  配置
+                  配置 <FontAwesomeIcon icon={faChevronRight} />
                 </Button>
               </SettingItem>
 
@@ -540,27 +592,30 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
               >
                 <Button 
                   type="text" 
-                  icon={<FontAwesomeIcon icon={faChevronRight} />}
                   size="small"
                   onClick={() => message.info('此功能正在开发中')}
                 >
-                  导出
+                  导出 <FontAwesomeIcon icon={faChevronRight} />
                 </Button>
               </SettingItem>
 
               <SettingItem 
-                label="网络测试"
-                description="测试GitHub连接状态，诊断下载问题"
+                label="代理设置"
+                description="配置网络代理，用于访问GitHub等外部服务"
               >
                 <Button 
                   type="text" 
-                  icon={<FontAwesomeIcon icon={faSync} />}
                   size="small"
-                  onClick={testNetworkConnection}
+                  onClick={() => setShowProxyModal(true)}
+                  style={{
+                    color: settings.proxy.enabled ? '#52c41a' : '#ff4d4f'
+                  }}
                 >
-                  测试连接
+                  {settings.proxy.enabled ? '已配置' : '未配置'} <FontAwesomeIcon icon={faChevronRight} />
                 </Button>
               </SettingItem>
+
+
             </div>
           </Card>
         </div>
@@ -572,10 +627,28 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
           <Space>
             <FontAwesomeIcon icon={faGithub} />
             <span>NodePass 核心 {latestRelease?.tag_name || ''}</span>
+            {nodePassStatus?.installed && latestRelease && nodePassStatus.version !== latestRelease.tag_name && (
+              <span style={{ 
+                color: '#ff4d4f', 
+                fontSize: '12px', 
+                fontWeight: 'bold',
+                backgroundColor: '#fff2f0',
+                border: '1px solid #ffccc7',
+                borderRadius: '4px',
+                padding: '2px 6px',
+                marginLeft: '8px'
+              }}>
+                新
+              </span>
+            )}
           </Space>
         }
         open={showDownloadModal}
-        onCancel={() => setShowDownloadModal(false)}
+        onCancel={() => {
+          setShowDownloadModal(false)
+          // 重置下载进度状态
+          setDownloadProgress(null)
+        }}
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             {/* 左侧：状态消息 */}
@@ -604,7 +677,10 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
             
             {/* 右侧：按钮 */}
             <Space>
-              <Button onClick={() => setShowDownloadModal(false)}>
+              <Button onClick={() => {
+                setShowDownloadModal(false)
+                setDownloadProgress(null)
+              }}>
                 取消
               </Button>
               <Button 
@@ -617,7 +693,8 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
                 {downloadProgress?.status === 'downloading' ? '下载中...' :
                  downloadProgress?.status === 'extracting' ? '安装中...' :
                  downloadProgress?.status === 'completed' ? '已完成' :
-                 downloadProgress?.status === 'error' ? '重新下载' : '下载安装'}
+                 downloadProgress?.status === 'error' ? '重新下载' : 
+                 (nodePassStatus?.installed ? '更新' : '下载安装')}
               </Button>
             </Space>
           </div>
@@ -650,8 +727,14 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
                 <Button 
                   type="link" 
                   icon={<FontAwesomeIcon icon={faGithub} />}
-                  href={latestRelease.html_url}
-                  target="_blank"
+                  onClick={async () => {
+                    try {
+                      await invoke('open_url_in_default_browser', { url: latestRelease.html_url })
+                    } catch (error) {
+                      console.error('打开浏览器失败:', error)
+                      message.error('打开浏览器失败')
+                    }
+                  }}
                   size="small"
                 >
                   查看详情
@@ -693,6 +776,14 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
           </div>
         )}
       </Modal>
+
+      {/* 代理设置弹窗 */}
+      <ProxySettingsModal
+        open={showProxyModal}
+        onCancel={() => setShowProxyModal(false)}
+        onSave={handleProxySettingsSave}
+        initialValues={settings.proxy}
+      />
     </div>
   )
 }

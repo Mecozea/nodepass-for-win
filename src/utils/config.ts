@@ -16,6 +16,16 @@ export interface TunnelConfig {
   lastStarted?: string
 }
 
+// 代理设置接口
+export interface ProxySettings {
+  enabled: boolean
+  host: string
+  port: string
+  username: string
+  password: string
+  type: 'http' | 'socks5'
+}
+
 // 系统设置接口
 export interface SystemSettings {
   theme: 'light' | 'dark' | 'auto'
@@ -30,6 +40,8 @@ export interface SystemSettings {
   // 导航设置
   isTopNav: boolean
   sidebarCollapsed: boolean
+  // 代理设置
+  proxy: ProxySettings
 }
 
 // 应用配置接口
@@ -54,7 +66,15 @@ const DEFAULT_CONFIG: AppConfig = {
     maxLogFiles: 10,
     logRetentionDays: 30,
     isTopNav: true,
-    sidebarCollapsed: false
+    sidebarCollapsed: false,
+    proxy: {
+      enabled: false,
+      host: '',
+      port: '',
+      username: '',
+      password: '',
+      type: 'http'
+    }
   },
   version: '1.0.0',
   lastUpdated: new Date().toISOString()
@@ -104,7 +124,12 @@ export class ConfigManager {
         ...loadedConfig,
         settings: {
           ...DEFAULT_CONFIG.settings,
-          ...loadedConfig.settings
+          ...loadedConfig.settings,
+          // 确保代理设置有默认值
+          proxy: {
+            ...DEFAULT_CONFIG.settings.proxy,
+            ...(loadedConfig.settings?.proxy || {})
+          }
         }
       }
     } catch (error) {

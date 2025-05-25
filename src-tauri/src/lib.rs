@@ -9,6 +9,8 @@ use tokio::io::{AsyncBufReadExt, BufReader, AsyncWriteExt};
 use tokio::process::Command as TokioCommand;
 use tokio_stream::StreamExt;
 use reqwest;
+use flate2::read::GzDecoder;
+use tar::Archive;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct NodePassConfig {
@@ -49,6 +51,17 @@ struct GitHubAsset {
     name: String,
     browser_download_url: String,
     size: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ProxySettings {
+    enabled: bool,
+    host: String,
+    port: String,
+    username: String,
+    password: String,
+    #[serde(rename = "type")]
+    proxy_type: String,
 }
 
 #[derive(Debug)]
@@ -396,13 +409,33 @@ async fn download_nodepass(
     app_handle: AppHandle,
     download_url: String,
     filename: String,
+    proxy_settings: Option<ProxySettings>,
 ) -> Result<String, String> {
     println!("开始下载: {} -> {}", download_url, filename);
     
-    let current_dir = match std::env::current_dir() {
-        Ok(dir) => dir,
+    // 获取系统临时目录
+    let temp_dir = std::env::temp_dir();
+    let target_path = temp_dir.join(&filename);
+    println!("临时下载路径: {:?}", target_path);
+    
+    // 获取最终的安装目录（使用可执行文件所在目录）
+    let install_dir = match std::env::current_exe() {
+        Ok(exe_path) => {
+            if let Some(exe_dir) = exe_path.parent() {
+                println!("使用可执行文件目录作为安装目录: {:?}", exe_dir);
+                exe_dir.to_path_buf()
+            } else {
+                let error_msg = "无法获取可执行文件父目录".to_string();
+                println!("错误: {}", error_msg);
+                let _ = app_handle.emit("download-progress", serde_json::json!({
+                    "status": "error",
+                    "message": error_msg
+                }));
+                return Err(error_msg);
+            }
+        }
         Err(e) => {
-            let error_msg = format!("获取当前目录失败: {}", e);
+            let error_msg = format!("获取可执行文件路径失败: {}", e);
             println!("错误: {}", error_msg);
             let _ = app_handle.emit("download-progress", serde_json::json!({
                 "status": "error",
@@ -411,70 +444,78 @@ async fn download_nodepass(
             return Err(error_msg);
         }
     };
-    
-    let target_path = current_dir.join(&filename);
-    println!("目标路径: {:?}", target_path);
+    println!("安装目录: {:?}", install_dir);
     
     // 发送开始下载事件
     let _ = app_handle.emit("download-progress", serde_json::json!({
         "status": "started",
-        "message": "开始下载..."
+        "message": "正在初始化下载..."
     }));
 
-    // 创建HTTP客户端，自动检测系统代理
+    // 创建HTTP客户端，支持用户配置的代理
     let mut client_builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30)); // 添加超时设置
-    
-    // 检测系统代理设置
-    if let Some(proxy_url) = detect_system_proxy() {
-        println!("检测到系统代理: {}", proxy_url);
-        
-        // 先尝试不使用代理进行连接测试
-        println!("测试直连是否可用...");
-        let test_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(|e| format!("创建测试客户端失败: {}", e))?;
+        .timeout(std::time::Duration::from_secs(60)) // 增加超时时间
+        .user_agent("NodePass-GUI/1.0");
+
+    // 处理代理设置
+    let mut proxy_info = String::new();
+    if let Some(proxy) = proxy_settings {
+        if proxy.enabled && !proxy.host.is_empty() && !proxy.port.is_empty() {
+            let proxy_url = if proxy.username.is_empty() {
+                format!("{}://{}:{}", proxy.proxy_type, proxy.host, proxy.port)
+            } else {
+                format!("{}://{}:{}@{}:{}", 
+                    proxy.proxy_type, proxy.username, proxy.password, proxy.host, proxy.port)
+            };
             
-        match test_client.head(&download_url).send().await {
-            Ok(response) => {
-                if response.status().is_success() {
-                    println!("直连测试成功，使用直连下载");
+            println!("使用用户配置的代理: {}", proxy_url);
+            proxy_info = format!("使用{}代理: {}:{}", proxy.proxy_type.to_uppercase(), proxy.host, proxy.port);
+            
+            match reqwest::Proxy::all(&proxy_url) {
+                Ok(proxy_config) => {
+                    client_builder = client_builder.proxy(proxy_config);
                     let _ = app_handle.emit("download-progress", serde_json::json!({
                         "status": "started",
-                        "message": "直连测试成功，使用直连下载..."
+                        "message": format!("已配置代理: {}:{}", proxy.host, proxy.port)
                     }));
-                } else {
-                    println!("直连测试失败，状态码: {}", response.status());
+                }
+                Err(e) => {
+                    let error_msg = format!("配置代理失败: {}", e);
+                    println!("错误: {}", error_msg);
+                    let _ = app_handle.emit("download-progress", serde_json::json!({
+                        "status": "error",
+                        "message": error_msg
+                    }));
+                    return Err(error_msg);
                 }
             }
-            Err(e) => {
-                println!("直连测试失败: {}，尝试使用系统代理", e);
-                match reqwest::Proxy::all(&proxy_url) {
-                    Ok(proxy) => {
-                        client_builder = client_builder.proxy(proxy);
-                        let _ = app_handle.emit("download-progress", serde_json::json!({
-                            "status": "started",
-                            "message": format!("使用系统代理: {}", proxy_url)
-                        }));
-                        println!("已配置系统代理");
-                    }
-                    Err(e) => {
-                        println!("配置代理失败: {}, 将使用直连", e);
-                        let _ = app_handle.emit("download-progress", serde_json::json!({
-                            "status": "started",
-                            "message": "代理配置失败，使用直连下载..."
-                        }));
-                    }
-                }
-            }
+        } else {
+            println!("代理已禁用或配置不完整，使用直连");
+            proxy_info = "直连".to_string();
         }
     } else {
-        println!("未检测到系统代理，使用直连");
-        let _ = app_handle.emit("download-progress", serde_json::json!({
-            "status": "started",
-            "message": "使用直连下载..."
-        }));
+        // 如果没有提供代理设置，尝试检测系统代理
+        if let Some(system_proxy_url) = detect_system_proxy() {
+            println!("检测到系统代理: {}", system_proxy_url);
+            proxy_info = format!("系统代理: {}", system_proxy_url);
+            
+            match reqwest::Proxy::all(&system_proxy_url) {
+                Ok(proxy_config) => {
+                    client_builder = client_builder.proxy(proxy_config);
+                    let _ = app_handle.emit("download-progress", serde_json::json!({
+                        "status": "started",
+                        "message": format!("使用系统代理: {}", system_proxy_url)
+                    }));
+                }
+                Err(e) => {
+                    println!("配置系统代理失败: {}, 使用直连", e);
+                    proxy_info = "直连".to_string();
+                }
+            }
+        } else {
+            println!("未检测到代理设置，使用直连");
+            proxy_info = "直连".to_string();
+        }
     }
 
     let client = match client_builder.build() {
@@ -493,10 +534,15 @@ async fn download_nodepass(
         }
     };
 
+    // 发送连接测试事件
+    let _ = app_handle.emit("download-progress", serde_json::json!({
+        "status": "started",
+        "message": format!("正在连接服务器... ({})", proxy_info)
+    }));
+
     println!("开始发送下载请求...");
     let response = match client
         .get(&download_url)
-        .header("User-Agent", "NodePass-GUI")
         .send()
         .await
     {
@@ -505,7 +551,7 @@ async fn download_nodepass(
             response
         },
         Err(e) => {
-            let error_msg = format!("下载请求失败: {}", e);
+            let error_msg = format!("下载请求失败: {} ({})", e, proxy_info);
             println!("错误: {}", error_msg);
             let _ = app_handle.emit("download-progress", serde_json::json!({
                 "status": "error",
@@ -516,7 +562,7 @@ async fn download_nodepass(
     };
 
     if !response.status().is_success() {
-        let error_msg = format!("下载失败，HTTP状态: {}", response.status());
+        let error_msg = format!("下载失败，HTTP状态: {} ({})", response.status(), proxy_info);
         println!("错误: {}", error_msg);
         let _ = app_handle.emit("download-progress", serde_json::json!({
             "status": "error",
@@ -527,6 +573,16 @@ async fn download_nodepass(
 
     let total_size = response.content_length().unwrap_or(0);
     println!("文件大小: {} bytes", total_size);
+    
+    // 发送开始下载事件
+    let _ = app_handle.emit("download-progress", serde_json::json!({
+        "status": "downloading",
+        "progress": 0,
+        "downloaded": 0,
+        "total": total_size,
+        "message": format!("开始下载... ({})", proxy_info)
+    }));
+    
     let mut downloaded = 0u64;
     let mut stream = response.bytes_stream();
     
@@ -547,6 +603,8 @@ async fn download_nodepass(
     };
 
     println!("开始下载文件内容...");
+    let mut last_progress = 0u64;
+    
     while let Some(chunk_result) = stream.next().await {
         let chunk = match chunk_result {
             Ok(chunk) => chunk,
@@ -573,17 +631,38 @@ async fn download_nodepass(
             return Err(error_msg);
         }
 
-        // 发送进度更新
+        // 更频繁地发送进度更新，提供更好的用户体验
         if total_size > 0 {
             let progress = (downloaded * 100) / total_size;
-            if downloaded % (total_size / 20).max(1024 * 1024) == 0 { // 每5%或每1MB更新一次
+            // 每1%或每512KB更新一次进度
+            if progress != last_progress || downloaded - (last_progress * total_size / 100) >= 512 * 1024 {
+                last_progress = progress;
                 println!("下载进度: {}% ({}/{})", progress, downloaded, total_size);
+                
+                let speed_info = if downloaded > 0 {
+                    let mb_downloaded = downloaded as f64 / 1024.0 / 1024.0;
+                    format!("{:.1} MB", mb_downloaded)
+                } else {
+                    "0 MB".to_string()
+                };
+                
                 let _ = app_handle.emit("download-progress", serde_json::json!({
                     "status": "downloading",
                     "progress": progress,
                     "downloaded": downloaded,
                     "total": total_size,
-                    "message": format!("下载中... {}%", progress)
+                    "message": format!("下载中... {}% ({}) - {}", progress, speed_info, proxy_info)
+                }));
+            }
+        } else {
+            // 如果无法获取总大小，每1MB更新一次
+            if downloaded % (1024 * 1024) == 0 {
+                let mb_downloaded = downloaded as f64 / 1024.0 / 1024.0;
+                println!("已下载: {:.1} MB", mb_downloaded);
+                let _ = app_handle.emit("download-progress", serde_json::json!({
+                    "status": "downloading",
+                    "downloaded": downloaded,
+                    "message": format!("下载中... {:.1} MB - {}", mb_downloaded, proxy_info)
                 }));
             }
         }
@@ -606,23 +685,28 @@ async fn download_nodepass(
     // 发送解压开始事件
     let _ = app_handle.emit("download-progress", serde_json::json!({
         "status": "extracting",
-        "message": "正在解压安装...",
+        "message": "正在从临时目录解压安装...",
         "progress": 0
     }));
 
-    // 解压文件
-    let extract_result = extract_nodepass_archive(&target_path, &current_dir, &app_handle).await;
+    // 解压文件到安装目录
+    let extract_result = extract_nodepass_archive(&target_path, &install_dir, &app_handle).await;
     
     match extract_result {
         Ok(extracted_exe_path) => {
             println!("解压成功: {}", extracted_exe_path);
-            // 删除压缩包
-            let _ = tokio::fs::remove_file(&target_path).await;
+            
+            // 清理临时文件
+            println!("清理临时文件: {:?}", target_path);
+            if let Err(e) = tokio::fs::remove_file(&target_path).await {
+                println!("警告: 删除临时文件失败: {}", e);
+                // 不影响主流程，只记录警告
+            }
             
             // 发送完成事件
             let _ = app_handle.emit("download-progress", serde_json::json!({
                 "status": "completed",
-                "message": "安装完成！",
+                "message": "安装完成！临时文件已清理",
                 "path": extracted_exe_path
             }));
 
@@ -630,6 +714,13 @@ async fn download_nodepass(
         }
         Err(e) => {
             println!("解压失败: {}", e);
+            
+            // 即使解压失败，也尝试清理临时文件
+            println!("清理临时文件: {:?}", target_path);
+            if let Err(cleanup_err) = tokio::fs::remove_file(&target_path).await {
+                println!("警告: 删除临时文件失败: {}", cleanup_err);
+            }
+            
             let _ = app_handle.emit("download-progress", serde_json::json!({
                 "status": "error",
                 "message": format!("解压失败: {}", e)
@@ -668,58 +759,7 @@ async fn open_directory(path: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn test_network_connection(url: String) -> Result<String, String> {
-    println!("测试网络连接: {}", url);
-    
-    // 测试直连
-    let direct_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("创建直连客户端失败: {}", e))?;
-    
-    match direct_client.head(&url).send().await {
-        Ok(response) => {
-            let status = response.status();
-            println!("直连测试结果: {}", status);
-            if status.is_success() {
-                return Ok(format!("直连成功: {}", status));
-            }
-        }
-        Err(e) => {
-            println!("直连测试失败: {}", e);
-        }
-    }
-    
-    // 如果直连失败，尝试使用系统代理
-    if let Some(proxy_url) = detect_system_proxy() {
-        println!("尝试使用系统代理: {}", proxy_url);
-        
-        let proxy_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .proxy(reqwest::Proxy::all(&proxy_url).map_err(|e| format!("配置代理失败: {}", e))?)
-            .build()
-            .map_err(|e| format!("创建代理客户端失败: {}", e))?;
-        
-        match proxy_client.head(&url).send().await {
-            Ok(response) => {
-                let status = response.status();
-                println!("代理测试结果: {}", status);
-                if status.is_success() {
-                    return Ok(format!("代理连接成功: {}", status));
-                } else {
-                    return Err(format!("代理连接失败: {}", status));
-                }
-            }
-            Err(e) => {
-                println!("代理测试失败: {}", e);
-                return Err(format!("代理连接失败: {}", e));
-            }
-        }
-    }
-    
-    Err("直连和代理连接都失败".to_string())
-}
+
 
 #[tauri::command]
 async fn show_window(app_handle: AppHandle) -> Result<(), String> {
@@ -895,9 +935,7 @@ fn load_configs(config_file: &PathBuf) -> Result<Vec<NodePassConfig>, Box<dyn st
 }
 
 fn find_nodepass_executable() -> Option<String> {
-    // 1. 首先检查应用资源目录（生产环境）
-    // 注意：在实际运行时，需要通过AppHandle来解析资源路径
-    // 这里先检查相对于可执行文件的位置
+    // 1. 优先检查可执行文件同目录（主要安装位置）
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
             let resource_exe = exe_dir.join("nodepass.exe");
@@ -906,23 +944,22 @@ fn find_nodepass_executable() -> Option<String> {
             }
         }
     }
-    
-    // 2. 检查当前目录（开发环境）
-    let current_dir_exe = std::env::current_dir()
-        .ok()?
-        .join("nodepass.exe");
-    
-    if current_dir_exe.exists() {
-        return Some(current_dir_exe.to_string_lossy().to_string());
-    }
 
-    // 3. 检查PATH环境变量
+    // 2. 检查PATH环境变量
     if let Ok(path) = std::env::var("PATH") {
         for dir in path.split(';') {
             let exe_path = PathBuf::from(dir).join("nodepass.exe");
             if exe_path.exists() {
                 return Some(exe_path.to_string_lossy().to_string());
             }
+        }
+    }
+    
+    // 3. 检查当前目录（开发环境）
+    if let Ok(current_dir) = std::env::current_dir() {
+        let current_dir_exe = current_dir.join("nodepass.exe");
+        if current_dir_exe.exists() {
+            return Some(current_dir_exe.to_string_lossy().to_string());
         }
     }
 
@@ -932,15 +969,50 @@ fn find_nodepass_executable() -> Option<String> {
 
 // 使用AppHandle的版本，用于更准确的资源路径解析
 fn find_nodepass_executable_with_handle(app_handle: &AppHandle) -> Option<String> {
-    // 1. 首先检查应用资源目录（生产环境）
+    // 1. 优先检查可执行文件同目录（主要安装位置）
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let exe_nodepass = exe_dir.join("nodepass.exe");
+            println!("检查可执行文件同目录: {:?}", exe_nodepass);
+            if exe_nodepass.exists() {
+                println!("在可执行文件同目录找到 nodepass.exe: {:?}", exe_nodepass);
+                return Some(exe_nodepass.to_string_lossy().to_string());
+            }
+        }
+    }
+    
+    // 2. 检查应用资源目录（生产环境）
     if let Ok(resource_path) = app_handle.path().resolve("nodepass.exe", tauri::path::BaseDirectory::Resource) {
+        println!("检查资源目录: {:?}", resource_path);
         if resource_path.exists() {
+            println!("在资源目录找到 nodepass.exe: {:?}", resource_path);
             return Some(resource_path.to_string_lossy().to_string());
         }
     }
     
-    // 2. 回退到通用检测方法
-    find_nodepass_executable()
+    // 3. 检查PATH环境变量
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in path.split(';') {
+            let exe_path = PathBuf::from(dir).join("nodepass.exe");
+            if exe_path.exists() {
+                println!("在PATH中找到 nodepass.exe: {:?}", exe_path);
+                return Some(exe_path.to_string_lossy().to_string());
+            }
+        }
+    }
+    
+    // 4. 最后检查当前工作目录（开发环境）
+    if let Ok(current_dir) = std::env::current_dir() {
+        let current_nodepass = current_dir.join("nodepass.exe");
+        println!("检查当前工作目录: {:?}", current_nodepass);
+        if current_nodepass.exists() {
+            println!("在当前工作目录找到 nodepass.exe: {:?}", current_nodepass);
+            return Some(current_nodepass.to_string_lossy().to_string());
+        }
+    }
+    
+    println!("未找到 nodepass.exe");
+    None
 }
 
 // 从NodePass输出中提取版本信息
@@ -991,6 +1063,135 @@ fn build_nodepass_command(config: &NodePassConfig) -> Result<Vec<String>, String
 
 // 解压NodePass压缩包
 async fn extract_nodepass_archive(
+    archive_path: &PathBuf,
+    extract_to: &PathBuf,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    let filename = archive_path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    
+    println!("解压文件: {} 到目录: {:?}", filename, extract_to);
+    
+    let result = if filename.ends_with(".tar.gz") || filename.ends_with(".tgz") {
+        // 处理 .tar.gz 格式
+        extract_tar_gz(archive_path, extract_to, app_handle).await
+    } else if filename.ends_with(".zip") {
+        // 处理 .zip 格式
+        extract_zip(archive_path, extract_to, app_handle).await
+    } else {
+        Err(format!("不支持的压缩包格式: {}", filename))
+    };
+    
+    match &result {
+        Ok(exe_path) => {
+            println!("解压完成，NodePass 可执行文件位于: {}", exe_path);
+        }
+        Err(e) => {
+            println!("解压失败: {}", e);
+        }
+    }
+    
+    result
+}
+
+// 解压 .tar.gz 格式
+async fn extract_tar_gz(
+    archive_path: &PathBuf,
+    extract_to: &PathBuf,
+    app_handle: &AppHandle,
+) -> Result<String, String> {
+    let file = std::fs::File::open(archive_path)
+        .map_err(|e| format!("打开压缩包失败: {}", e))?;
+    
+    let decoder = GzDecoder::new(file);
+    let mut archive = Archive::new(decoder);
+    
+    let entries = archive.entries()
+        .map_err(|e| format!("读取压缩包条目失败: {}", e))?;
+    
+    let mut extracted_exe_path = None;
+    let mut file_count = 0;
+    let mut total_files = 0;
+    
+    // 先计算总文件数
+    let file_for_count = std::fs::File::open(archive_path)
+        .map_err(|e| format!("打开压缩包失败: {}", e))?;
+    let decoder_for_count = GzDecoder::new(file_for_count);
+    let mut archive_for_count = Archive::new(decoder_for_count);
+    
+    for entry in archive_for_count.entries().map_err(|e| format!("读取压缩包失败: {}", e))? {
+        if entry.is_ok() {
+            total_files += 1;
+        }
+    }
+    
+    println!("压缩包中共有 {} 个文件", total_files);
+    
+    // 重新打开文件进行解压
+    let file = std::fs::File::open(archive_path)
+        .map_err(|e| format!("重新打开压缩包失败: {}", e))?;
+    let decoder = GzDecoder::new(file);
+    let mut archive = Archive::new(decoder);
+    
+    for entry in archive.entries().map_err(|e| format!("读取压缩包条目失败: {}", e))? {
+        let mut entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
+        
+        file_count += 1;
+        
+        // 先获取路径信息，避免借用冲突
+        let path = entry.path().map_err(|e| format!("获取文件路径失败: {}", e))?;
+        let file_name = path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_string(); // 转换为owned string
+        
+        let is_dir = entry.header().entry_type().is_dir();
+        let outpath = extract_to.join(&*path);
+        
+        println!("解压文件: {}", file_name);
+        
+        // 发送解压进度
+        let progress = if total_files > 0 {
+            (file_count * 100) / total_files
+        } else {
+            0
+        };
+        
+        let _ = app_handle.emit("download-progress", serde_json::json!({
+            "status": "extracting",
+            "message": format!("正在解压... {}/{} ({})", file_count, total_files, file_name),
+            "progress": progress
+        }));
+        
+        if is_dir {
+            // 创建目录
+            std::fs::create_dir_all(&outpath)
+                .map_err(|e| format!("创建目录失败: {}", e))?;
+        } else {
+            // 创建父目录
+            if let Some(parent) = outpath.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("创建父目录失败: {}", e))?;
+            }
+            
+            // 解压文件
+            entry.unpack(&outpath)
+                .map_err(|e| format!("解压文件失败: {}", e))?;
+            
+            // 检查是否是nodepass.exe
+            if file_name == "nodepass.exe" {
+                extracted_exe_path = Some(outpath.to_string_lossy().to_string());
+                println!("找到 nodepass.exe: {}", outpath.display());
+            }
+        }
+    }
+    
+    extracted_exe_path.ok_or_else(|| "压缩包中未找到nodepass.exe文件".to_string())
+}
+
+// 解压 .zip 格式
+async fn extract_zip(
     archive_path: &PathBuf,
     extract_to: &PathBuf,
     app_handle: &AppHandle,
@@ -1326,7 +1527,6 @@ pub fn run() {
             get_latest_release,
             download_nodepass,
             open_directory,
-            test_network_connection,
             show_window,
             hide_window,
             get_running_tunnels_count,
