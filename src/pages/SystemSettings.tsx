@@ -7,6 +7,7 @@ import {
   faDownload, 
   faSync, 
   faCog, 
+  faMicrochip,
   faPalette, 
   faSun, 
   faMoon, 
@@ -93,6 +94,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
   const [checkingStatus, setCheckingStatus] = useState(false)
   const [appVersion, setAppVersion] = useState<string>('0.0.1')
   const [showProxyModal, setShowProxyModal] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
   
   // 从Context获取设置和日志
   const { settings, updateSettings, theme, setTheme, isTopNav, setIsTopNav } = useSettings()
@@ -111,6 +113,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
       if (progress.status === 'completed') {
         message.success('NodePass 安装完成！')
         addLog('info', 'NodePass 核心安装完成', 'SystemSettings')
+        setIsDownloading(false)
         setTimeout(() => {
           checkNodePassStatus()
           setShowDownloadModal(false)
@@ -119,6 +122,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
         // 错误信息只记录到日志，不显示在前端
         addLog('error', `NodePass 下载失败: ${progress.message}`, 'SystemSettings')
         console.error('下载失败:', progress.message)
+        setIsDownloading(false)
       }
     })
 
@@ -176,6 +180,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
 
   const downloadNodePass = async (asset: GitHubAsset) => {
     try {
+      setIsDownloading(true)
       addLog('info', `开始下载 NodePass: ${asset.name}`, 'SystemSettings')
       setDownloadProgress({
         status: 'started',
@@ -222,6 +227,8 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
       } catch (msgError) {
         console.error('显示错误消息失败:', msgError)
       }
+    } finally {
+      setIsDownloading(false)
     }
   }
 
@@ -308,6 +315,27 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
     }
   }
 
+  // 取消下载
+  const cancelDownload = async () => {
+    try {
+      // 调用后端取消下载
+      await invoke('cancel_download')
+      setIsDownloading(false)
+      setDownloadProgress(null)
+      setShowDownloadModal(false)
+      addLog('info', '用户取消下载', 'SystemSettings')
+      message.info('已取消下载')
+    } catch (error) {
+      console.error('取消下载失败:', error)
+      // 即使后端取消失败，也要重置前端状态
+      setIsDownloading(false)
+      setDownloadProgress(null)
+      setShowDownloadModal(false)
+      addLog('error', `取消下载失败: ${error}`, 'SystemSettings')
+      message.warning('取消下载请求已发送')
+    }
+  }
+
   const handleProxySettingsSave = async (proxySettings: ProxySettings) => {
     try {
       await updateSettings({ proxy: proxySettings })
@@ -380,7 +408,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
             title={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Space>
-                  <FontAwesomeIcon icon={faCog} />
+                  <FontAwesomeIcon icon={faMicrochip} />
                   <span>NodePass 核心</span>
                 </Space>
                 <Button 
@@ -677,20 +705,23 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
             
             {/* 右侧：按钮 */}
             <Space>
-              <Button onClick={() => {
-                setShowDownloadModal(false)
-                setDownloadProgress(null)
-              }}>
+              <Button 
+                onClick={isDownloading ? cancelDownload : () => {
+                  setShowDownloadModal(false)
+                  setDownloadProgress(null)
+                }}
+              >
                 取消
               </Button>
               <Button 
                 type="primary"
-                icon={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting' ? undefined : <FontAwesomeIcon icon={faDownload} />}
+                icon={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting' || downloadProgress?.status === 'started' ? undefined : <FontAwesomeIcon icon={faDownload} />}
                 onClick={downloadSystemAppropriate}
-                disabled={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting' || downloadProgress?.status === 'completed'}
-                loading={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting'}
+                disabled={isDownloading || downloadProgress?.status === 'completed'}
+                loading={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting' || downloadProgress?.status === 'started'}
               >
-                {downloadProgress?.status === 'downloading' ? '下载中...' :
+                {downloadProgress?.status === 'started' ? '准备中...' :
+                 downloadProgress?.status === 'downloading' ? '下载中...' :
                  downloadProgress?.status === 'extracting' ? '安装中...' :
                  downloadProgress?.status === 'completed' ? '已完成' :
                  downloadProgress?.status === 'error' ? '重新下载' : 
@@ -709,42 +740,37 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
       >
         {latestRelease && (
           <div>
-            {/* 版本信息卡片 */}
-            <Card size="small" style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: 4 }}>
-                    {latestRelease.name}
-                  </div>
-                  <div style={{ color: '#666', fontSize: '12px' }}>
-                    发布时间: {new Date(latestRelease.published_at).toLocaleDateString('zh-CN', {
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
-                  </div>
-                </div>
-                <Button 
-                  type="link" 
-                  icon={<FontAwesomeIcon icon={faGithub} />}
-                  onClick={async () => {
-                    try {
-                      await invoke('open_url_in_default_browser', { url: latestRelease.html_url })
-                    } catch (error) {
-                      console.error('打开浏览器失败:', error)
-                      message.error('打开浏览器失败')
-                    }
-                  }}
-                  size="small"
-                >
-                  查看详情
-                </Button>
-              </div>
-            </Card>
-
             {/* 更新日志 */}
             <Card 
-              title="更新日志" 
+              title={
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span>更新日志</span>
+                    <span style={{ color: '#666', fontSize: '12px', fontWeight: 'normal' }}>
+                      {new Date(latestRelease.published_at).toLocaleDateString('zh-CN', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </span>
+                  </div>
+                  <Button 
+                    type="link" 
+                    onClick={async () => {
+                      try {
+                        await invoke('open_url_in_default_browser', { url: latestRelease.html_url })
+                      } catch (error) {
+                        console.error('打开浏览器失败:', error)
+                        message.error('打开浏览器失败')
+                      }
+                    }}
+                    size="small"
+                    style={{ fontSize: '12px' }}
+                  >
+                    查看详情
+                  </Button>
+                </div>
+              }
               size="small" 
               style={{ marginBottom: 16 }}
             >
@@ -759,20 +785,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
               </div>
             </Card>
 
-            {/* 安装说明 */}
-            <Alert
-              type="info"
-              message="安装说明"
-              description={
-                <div style={{ fontSize: '12px' }}>
-                  下载完成后，文件将保存在项目根目录。详细的安装和部署说明请参考 
-                  <Button type="link" size="small" style={{ padding: 0, marginLeft: 4, fontSize: '12px' }}>
-                    INSTALL.md
-                  </Button>
-                </div>
-              }
-              style={{ marginBottom: 16 }}
-            />
+
           </div>
         )}
       </Modal>

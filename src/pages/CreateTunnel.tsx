@@ -19,7 +19,6 @@ const { TextArea } = Input
 interface CreateTunnelForm {
   mode: 'server' | 'client'
   name: string
-  protocol: 'TCP' | 'UDP'
   tunnelAddr: string
   targetAddr: string
   tlsMode: '0' | '1' | '2'
@@ -38,7 +37,6 @@ const CreateTunnel: React.FC = () => {
   const [config, setConfig] = useState<CreateTunnelForm>({
     mode: 'server',
     name: '',
-    protocol: 'TCP',
     tunnelAddr: '',
     targetAddr: '',
     tlsMode: '1',
@@ -59,7 +57,7 @@ const CreateTunnel: React.FC = () => {
 
   const handleDeploy = async () => {
     try {
-      // 使用配置管理器保存隧道
+      // 使用配置管理器保存隧道，添加默认的protocol字段（虽然不再使用）
       const tunnelId = await configManager.addTunnel(config)
       console.log('隧道创建成功，ID:', tunnelId)
       addLog('info', `隧道创建成功: ${config.name}`, 'CreateTunnel')
@@ -178,7 +176,7 @@ const CreateTunnel: React.FC = () => {
           return (
             <>
               <Row gutter={[24, 0]}>
-                <Col span={12}>
+                <Col span={24}>
                   <Form.Item
                     name="name"
                     label="隧道名称"
@@ -187,33 +185,7 @@ const CreateTunnel: React.FC = () => {
                       { pattern: /^[a-zA-Z0-9-_]+$/, message: '只能包含字母、数字、连字符和下划线' }
                     ]}
                   >
-                    <Input placeholder="例如: web-server-tunnel" />
-                  </Form.Item>
-                </Col>
-                
-                <Col span={12}>
-                  <Form.Item
-                    name="protocol"
-                    label="协议"
-                    rules={[{ required: true, message: '请选择协议' }]}
-                  >
-                    <Select 
-                      placeholder="选择协议"
-                      style={{ width: '100%' }}
-                    >
-                      <Option value="TCP">
-                        <Space>
-                          <span>🔗</span>
-                          <span>TCP</span>
-                        </Space>
-                      </Option>
-                      <Option value="UDP">
-                        <Space>
-                          <span>📡</span>
-                          <span>UDP</span>
-                        </Space>
-                      </Option>
-                    </Select>
+                    <Input placeholder="例如: web-server-tunnel" autoComplete="off" />
                   </Form.Item>
                 </Col>
               </Row>
@@ -228,6 +200,7 @@ const CreateTunnel: React.FC = () => {
                     <Input 
                       placeholder="例如: 0.0.0.0:10101"
                       addonBefore={<span>🌐</span>}
+                      autoComplete="off"
                     />
                   </Form.Item>
                 </Col>
@@ -241,6 +214,7 @@ const CreateTunnel: React.FC = () => {
                     <Input 
                       placeholder="0.0.0.0:8080" 
                       addonBefore={<span>🌐</span>}
+                      autoComplete="off"
                     />
                   </Form.Item>
                 </Col>
@@ -338,6 +312,7 @@ const CreateTunnel: React.FC = () => {
                         <Input 
                           placeholder="/path/to/cert.pem" 
                           disabled={tlsMode !== '2'}
+                          autoComplete="off"
                         />
                       </Form.Item>
                     </Col>
@@ -351,6 +326,7 @@ const CreateTunnel: React.FC = () => {
                         <Input 
                           placeholder="/path/to/key.pem" 
                           disabled={tlsMode !== '2'}
+                          autoComplete="off"
                         />
                       </Form.Item>
                     </Col>
@@ -557,7 +533,6 @@ const CreateTunnel: React.FC = () => {
               <ul style={{ margin: 0, paddingLeft: '20px', lineHeight: '1.8' }}>
                 <li><strong>隧道模式：</strong>{config.mode === 'server' ? '服务器模式' : '客户端模式'}</li>
                 <li><strong>隧道名称：</strong>{config.name}</li>
-                <li><strong>协议：</strong>{config.protocol}</li>
                 <li><strong>隧道地址：</strong>{config.tunnelAddr}</li>
                 <li><strong>目标地址：</strong>{config.targetAddr}</li>
                 {config.mode === 'server' && (

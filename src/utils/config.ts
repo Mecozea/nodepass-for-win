@@ -3,7 +3,6 @@ export interface TunnelConfig {
   id: string
   name: string
   mode: 'server' | 'client'
-  protocol: 'TCP' | 'UDP'
   tunnelAddr: string
   targetAddr: string
   tlsMode: '0' | '1' | '2'

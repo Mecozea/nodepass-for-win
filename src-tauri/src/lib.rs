@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent, tray::{TrayIconBuilder, TrayIconEvent}, menu::{Menu, MenuItem}};
 use tokio::io::{AsyncBufReadExt, BufReader, AsyncWriteExt};
 use tokio::process::Command as TokioCommand;
@@ -72,6 +73,9 @@ struct ProcessInfo {
 }
 
 type ProcessMap = Arc<Mutex<HashMap<u32, ProcessInfo>>>;
+
+// 全局下载取消标志
+static DOWNLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 struct AppState {
     processes: ProcessMap,
@@ -413,6 +417,9 @@ async fn download_nodepass(
 ) -> Result<String, String> {
     println!("开始下载: {} -> {}", download_url, filename);
     
+    // 重置取消标志
+    DOWNLOAD_CANCELLED.store(false, Ordering::Relaxed);
+    
     // 获取系统临时目录
     let temp_dir = std::env::temp_dir();
     let target_path = temp_dir.join(&filename);
@@ -606,6 +613,18 @@ async fn download_nodepass(
     let mut last_progress = 0u64;
     
     while let Some(chunk_result) = stream.next().await {
+        // 检查是否被取消
+        if DOWNLOAD_CANCELLED.load(Ordering::Relaxed) {
+            println!("下载被用户取消");
+            let _ = app_handle.emit("download-progress", serde_json::json!({
+                "status": "error",
+                "message": "下载已取消"
+            }));
+            // 清理临时文件
+            let _ = tokio::fs::remove_file(&target_path).await;
+            return Err("下载已取消".to_string());
+        }
+        
         let chunk = match chunk_result {
             Ok(chunk) => chunk,
             Err(e) => {
@@ -728,6 +747,13 @@ async fn download_nodepass(
             Err(e)
         }
     }
+}
+
+#[tauri::command]
+async fn cancel_download() -> Result<(), String> {
+    println!("收到取消下载请求，设置取消标志");
+    DOWNLOAD_CANCELLED.store(true, Ordering::Relaxed);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1526,6 +1552,7 @@ pub fn run() {
             check_nodepass_status,
             get_latest_release,
             download_nodepass,
+            cancel_download,
             open_directory,
             show_window,
             hide_window,
