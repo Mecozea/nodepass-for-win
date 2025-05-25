@@ -17,6 +17,7 @@
   --text-primary: #111827;
   --text-secondary: #6b7280;
   --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --primary-bg: #f6f8ff;
 
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -31,6 +32,42 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+}
+
+/* 浅色主题 */
+[data-theme="light"] {
+  --card-bg: #ffffff;
+  --card-border: #d9d9d9;
+  --card-selected-bg: #f6f8ff;
+  --card-selected-border: #131B2C;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --code-bg: #f6f8fa;
+  --code-text: #e83e8c;
+  --header-bg: #f6f8fa;
+}
+
+/* 深色主题 */
+[data-theme="dark"] {
+  --primary-color: #1890ff;
+  --secondary-color: #a6a6a6;
+  --success-color: #52c41a;
+  --danger-color: #ff4d4f;
+  --warning-color: #faad14;
+  --background: #141414;
+  --surface: #1f1f1f;
+  --border: #303030;
+  --text-primary: #ffffff;
+  --text-secondary: #a6a6a6;
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+  --primary-bg: #262626;
+  --card-bg: #1f1f1f;
+  --card-border: #404040;
+  --card-selected-bg: #262626;
+  --card-selected-border: #1890ff;
+  --code-bg: #262626;
+  --code-text: #ff7875;
+  --header-bg: #262626;
 }
 
 * {

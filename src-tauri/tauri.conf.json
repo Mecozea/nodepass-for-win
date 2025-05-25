@@ -18,7 +18,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "resources/nodepass.exe": "./"
+    }
   },
   "app": {
     "windows": [
@@ -27,7 +30,8 @@
         "width": 1200,
         "height": 800,
         "resizable": false,
-        "center": true
+        "center": true,
+        "decorations": true
       }
     ],
     "security": {

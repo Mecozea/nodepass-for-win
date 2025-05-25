@@ -191,3 +191,84 @@ nodepass-win/
     ├── start.bat               # 快速启动脚本
     ├── README.md               # 应用说明
     └── INSTALL.md              # 详细安装指南 
+
+## 核心文件部署
+
+NodePass GUI 需要 NodePass 核心执行文件才能正常工作。系统会按照以下优先级自动检测核心文件：
+
+### 检测优先级
+
+1. **📦 应用资源目录** (推荐生产环境)
+   - Windows: `应用程序目录/nodepass.exe`
+   - 打包时自动包含，无需手动配置
+
+2. **🔧 项目开发目录** (开发环境)
+   - 项目根目录下的 `nodepass.exe`
+   - 适合开发和测试
+
+3. **🌐 系统PATH环境变量**
+   - 系统全局安装的 NodePass
+   - 可通过命令行直接访问
+
+4. **💻 直接命令调用**
+   - 假设 `nodepass` 命令在系统PATH中可用
+
+### 部署建议
+
+#### 生产环境部署
+```bash
+# 将 nodepass.exe 放在应用资源目录
+# 构建时会自动包含到应用包中
+cp nodepass.exe src-tauri/resources/
+```
+
+#### 开发环境部署
+```bash
+# 将 nodepass.exe 放在项目根目录
+cp nodepass.exe ./
+```
+
+#### 系统安装
+```bash
+# 将 nodepass.exe 添加到系统PATH
+# 或安装到系统目录如 C:\Windows\System32\
+```
+
+### 获取 NodePass 核心
+
+1. **从 GitHub 下载**
+   - 访问 [NodePass Releases](https://github.com/yosebyte/nodepass/releases)
+   - 下载适合你系统的版本
+
+2. **通过应用内下载**
+   - 打开 NodePass GUI
+   - 进入系统设置页面
+   - 点击"获取最新版本"按钮
+
+### 验证安装
+
+启动 NodePass GUI 后，在系统设置页面可以查看：
+- ✅ 安装状态
+- 📍 检测到的文件路径
+- 🏷️ 版本信息
+- 📂 路径类型（资源目录/开发目录/系统PATH）
+
+### 故障排除
+
+如果核心文件检测失败：
+
+1. **检查文件权限**
+   - 确保 `nodepass.exe` 有执行权限
+   - Windows: 右键 → 属性 → 安全
+
+2. **检查文件完整性**
+   - 重新下载核心文件
+   - 验证文件大小和MD5
+
+3. **手动指定路径**
+   - 将文件放在项目根目录
+   - 或添加到系统PATH环境变量
+
+4. **查看日志**
+   - 检查应用控制台输出
+   - 查看错误信息详情 

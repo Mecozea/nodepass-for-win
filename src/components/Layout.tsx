@@ -2,12 +2,11 @@ import React from 'react'
 import { Layout, Menu, Typography } from 'antd'
 import type { MenuProps } from 'antd'
 import {
-  DashboardOutlined,
   DatabaseOutlined,
   SettingOutlined,
-  PlusOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useSettings } from '../context/SettingsContext'
@@ -20,34 +19,28 @@ interface AppLayoutProps {
 }
 
 const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
-  const { isTopNav, collapsed, setCollapsed } = useSettings()
+  const { collapsed, setCollapsed, isTopNav, isDarkMode } = useSettings()
   const navigate = useNavigate()
   const location = useLocation()
 
   // 菜单项配置
   const menuItems: MenuProps['items'] = [
     {
-      key: '/dashboard',
-      icon: <DashboardOutlined />,
-      label: '仪表盘',
-      onClick: () => navigate('/dashboard'),
-    },
-    {
       key: '/tunnels',
       icon: <DatabaseOutlined />,
-      label: '隧道管理',
+      label: '隧道',
       onClick: () => navigate('/tunnels'),
     },
     {
-      key: '/tunnels/create',
-      icon: <PlusOutlined />,
-      label: '创建隧道',
-      onClick: () => navigate('/tunnels/create'),
+      key: '/logs',
+      icon: <FileTextOutlined />,
+      label: '日志',
+      onClick: () => navigate('/logs'),
     },
     {
       key: '/settings',
       icon: <SettingOutlined />,
-      label: '系统设置',
+      label: '设置',
       onClick: () => navigate('/settings'),
     },
   ]
@@ -60,25 +53,34 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         <Header
           style={{
             padding: '0 24px',
-            background: '#131B2C',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: isDarkMode ? '#001529' : '#131B2C',
+            boxShadow: '0 1px 4px rgba(0,21,41,.08)',
           }}
         >
-          <Title level={4} style={{ color: 'white', margin: '0 32px 0 0' }}>
+          {/* Logo */}
+          <Title level={4} style={{ color: 'white', margin: 0 }}>
             🚀 NodePass
           </Title>
+
+          {/* 顶部菜单 */}
           <Menu
             theme="dark"
             mode="horizontal"
             selectedKeys={[location.pathname]}
             items={menuItems}
             style={{
-              background: '#131B2C',
+              backgroundColor: 'transparent',
               border: 'none',
               flex: 1,
+              justifyContent: 'center',
             }}
           />
+
+          {/* 占位符，保持布局平衡 */}
+          <div style={{ width: '120px' }} />
         </Header>
 
         {/* 主要内容 */}
@@ -86,11 +88,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           style={{
             margin: '16px',
             padding: '16px',
-            background: '#fff',
             borderRadius: '8px',
             minHeight: 280,
-            overflow: 'auto',
-            height: 'calc(100vh - 112px)', // 减去header高度和margin
+            overflow: 'hidden',
+            height: 'calc(100vh - 80px)', // 减去header高度
           }}
         >
           {children}
@@ -99,7 +100,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     )
   }
 
-  // 侧边导航布局（默认）
+  // 侧边导航布局
   return (
     <Layout style={{ minHeight: '100vh' }}>
       {/* 侧边栏 */}
@@ -110,7 +111,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         theme="dark"
         width={250}
         style={{
-          background: '#131B2C',
+          backgroundColor: isDarkMode ? '#001529' : '#131B2C',
         }}
       >
         {/* Logo */}
@@ -143,7 +144,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           selectedKeys={[location.pathname]}
           items={menuItems}
           style={{
-            background: '#131B2C',
+            backgroundColor: isDarkMode ? '#001529' : '#131B2C',
             border: 'none',
           }}
         />
@@ -155,10 +156,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         <Header
           style={{
             padding: '0 24px',
-            background: '#fff',
             display: 'flex',
             alignItems: 'center',
             boxShadow: '0 1px 4px rgba(0,21,41,.08)',
+            backgroundColor: isDarkMode ? '#1f1f1f' : '#ffffff',
           }}
         >
           {/* 折叠按钮 */}
@@ -174,10 +175,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           style={{
             margin: '16px',
             padding: '16px',
-            background: '#fff',
             borderRadius: '8px',
             minHeight: 280,
-            overflow: 'auto',
+            overflow: 'hidden',
             height: 'calc(100vh - 112px)', // 减去header高度和margin
           }}
         >
