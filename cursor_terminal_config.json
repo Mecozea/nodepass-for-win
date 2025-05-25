@@ -1,0 +1,36 @@
+{
+  "terminal.integrated.profiles.windows": {
+    "PowerShell": {
+      "source": "PowerShell",
+      "icon": "terminal-powershell",
+      "env": {
+        "PATH": "${env:PATH}"
+      }
+    },
+    "Command Prompt": {
+      "path": [
+        "${env:windir}\\Sysnative\\cmd.exe",
+        "${env:windir}\\System32\\cmd.exe"
+      ],
+      "args": [],
+      "icon": "terminal-cmd",
+      "env": {
+        "PATH": "${env:PATH}"
+      }
+    },
+    "Git Bash": {
+      "source": "Git Bash"
+    },
+    "Windows PowerShell": {
+      "path": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "env": {
+        "PATH": "${env:PATH}"
+      }
+    }
+  },
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "terminal.integrated.inheritEnv": true,
+  "terminal.integrated.env.windows": {
+    "PATH": "${env:PATH}"
+  }
+} 

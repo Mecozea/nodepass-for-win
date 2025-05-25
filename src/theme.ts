@@ -37,7 +37,7 @@ export const lightTheme: ThemeConfig = {
   },
   components: {
     Layout: {
-      headerBg: '#ffffff',
+      headerBg: '#131B2C',
       siderBg: '#131B2C',
       bodyBg: '#f8f9fa',
     },
@@ -94,7 +94,7 @@ export const darkTheme: ThemeConfig = {
   },
   components: {
     Layout: {
-      headerBg: '#001529',
+      headerBg: '#131B2C',
       bodyBg: '#141414',
       siderBg: '#001529',
     },

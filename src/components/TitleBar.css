@@ -1,0 +1,96 @@
+/* 自定义标题栏样式 */
+.custom-titlebar {
+  background-color: #131B2C;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  user-select: none;
+  -webkit-app-region: drag; /* 允许拖拽窗口 */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+}
+
+.titlebar-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+}
+
+.titlebar-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag; /* 按钮区域不允许拖拽 */
+}
+
+.titlebar-button {
+  width: 46px !important;
+  height: 32px !important;
+  border-radius: 0 !important;
+  border: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #ffffff !important;
+  background: transparent !important;
+  transition: background-color 0.2s ease !important;
+  padding: 0 !important;
+}
+
+.titlebar-button:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.titlebar-button:active {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.titlebar-button.close-button:hover {
+  background-color: #e81123 !important;
+  color: #ffffff !important;
+}
+
+.titlebar-button.close-button:active {
+  background-color: #f1707a !important;
+  color: #ffffff !important;
+}
+
+.titlebar-button .anticon {
+  font-size: 12px;
+}
+
+/* 确保按钮在深色主题下正确显示 */
+[data-theme="dark"] .titlebar-button {
+  color: #ffffff !important;
+}
+
+[data-theme="light"] .titlebar-button {
+  color: #ffffff !important;
+}
+
+/* 为主内容区域添加顶部边距，避免被标题栏遮挡 */
+.app-content-with-titlebar {
+  margin-top: 32px;
+  height: calc(100vh - 32px);
+  overflow: hidden; /* 防止整体滚动 */
+} 

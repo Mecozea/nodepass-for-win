@@ -3,13 +3,14 @@ import { Card, Button, Form, Input, Select, Space, message, Row, Col, Modal, Des
 import { useNavigate } from 'react-router-dom'
 import {
   CheckCircleOutlined,
-  DesktopOutlined,
-  LaptopOutlined,
   CopyOutlined,
 } from '@ant-design/icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faServer, faDesktop } from '@fortawesome/free-solid-svg-icons'
 import { configManager } from '../utils/config'
 import { invoke } from '@tauri-apps/api/core'
 import { useLog } from '../context/LogContext'
+import { useTunnel } from '../context/TunnelContext'
 
 const { Option } = Select
 const { TextArea } = Input
@@ -30,6 +31,7 @@ interface CreateTunnelForm {
 const CreateTunnel: React.FC = () => {
   const navigate = useNavigate()
   const { addLog } = useLog()
+  const { triggerRefresh } = useTunnel()
   const [form] = Form.useForm()
   const [selectedMode, setSelectedMode] = useState<'server' | 'client'>('server')
   const [showConfirmModal, setShowConfirmModal] = useState(false)
@@ -100,6 +102,9 @@ const CreateTunnel: React.FC = () => {
 
             message.success(`隧道启动成功，进程ID: ${processId}`)
             addLog('info', `隧道 ${config.name} 启动成功，进程ID: ${processId}`, 'CreateTunnel')
+            
+            // 触发隧道管理页面刷新
+            triggerRefresh()
           } catch (error) {
             const errorMsg = `启动隧道失败: ${error}`
             message.error(errorMsg)
@@ -107,10 +112,15 @@ const CreateTunnel: React.FC = () => {
             
             // 更新隧道状态为错误
             await configManager.updateTunnel(tunnelId, { status: 'error' })
+            
+            // 触发隧道管理页面刷新以更新错误状态
+            triggerRefresh()
           }
         },
         onCancel: () => {
           addLog('info', `隧道 ${config.name} 创建完成，未启动`, 'CreateTunnel')
+          // 即使未启动也要触发刷新，更新总实例数量
+          triggerRefresh()
         }
       })
       
@@ -246,24 +256,42 @@ const CreateTunnel: React.FC = () => {
                         label="TLS 安全级别"
                         rules={[{ required: true, message: '请选择TLS安全级别' }]}
                       >
-                        <Select placeholder="选择TLS安全级别">
-                          <Option value="0">
-                            <Space>
-                              <span>🔓</span>
-                              <span>模式 0 - 无加密</span>
-                            </Space>
+                        <Select 
+                          placeholder="选择TLS安全级别"
+                          optionLabelProp="label"
+                        >
+                          <Option value="0" label="🔓 模式 0 - 无加密">
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span>🔓</span>
+                                <span>模式 0 - 无加密</span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#999', marginTop: '2px', marginLeft: '20px' }}>
+                                数据传输不加密，仅适用于测试环境
+                              </div>
+                            </div>
                           </Option>
-                          <Option value="1">
-                            <Space>
-                              <span>🔒</span>
-                              <span>模式 1 - 自签名证书</span>
-                            </Space>
+                          <Option value="1" label="🔒 模式 1 - 自签名证书">
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span>🔒</span>
+                                <span>模式 1 - 自签名证书</span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#999', marginTop: '2px', marginLeft: '20px' }}>
+                                系统将自动生成证书，无需手动配置
+                              </div>
+                            </div>
                           </Option>
-                          <Option value="2">
-                            <Space>
-                              <span>🔐</span>
-                              <span>模式 2 - 验证证书</span>
-                            </Space>
+                          <Option value="2" label="🔐 模式 2 - 验证证书">
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span>🔐</span>
+                                <span>模式 2 - 验证证书</span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#999', marginTop: '2px', marginLeft: '20px' }}>
+                                使用自定义证书文件，需要配置证书路径
+                              </div>
+                            </div>
                           </Option>
                         </Select>
                       </Form.Item>
@@ -327,21 +355,6 @@ const CreateTunnel: React.FC = () => {
                       </Form.Item>
                     </Col>
                   </Row>
-
-                  {/* TLS模式提示信息 */}
-                  {(tlsMode === '0' || tlsMode === '1') && (
-                    <div style={{ 
-                      padding: '8px 12px', 
-                      backgroundColor: '#f6f8fa', 
-                      borderRadius: '4px', 
-                      fontSize: '12px', 
-                      color: '#666',
-                      marginTop: '4px'
-                    }}>
-                      {tlsMode === '0' && '⚠️ 无加密模式：数据传输不加密，仅适用于测试环境'}
-                      {tlsMode === '1' && '🔒 自签名证书模式：系统将自动生成证书，无需手动配置'}
-                    </div>
-                  )}
                 </>
               )}
             </>
@@ -353,26 +366,9 @@ const CreateTunnel: React.FC = () => {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        marginBottom: 16 
-      }}>
-        <h1 style={{ margin: 0 }}>创建隧道</h1>
-        <Button 
-          type="primary"
-          onClick={handleSubmit}
-          icon={<CheckCircleOutlined />}
-          size="large"
-        >
-          创建
-        </Button>
-      </div>
-
       {/* 合并的配置Card */}
       <Card style={{ 
-        marginBottom: 16,
+        marginBottom: 8,
         display: 'flex', 
         flexDirection: 'column'
       }} bodyStyle={{ 
@@ -388,11 +384,13 @@ const CreateTunnel: React.FC = () => {
           size="middle"
         >
           {/* 隧道模式选择 */}
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 8 }}>
             <Form.Item
               name="mode"
               label="选择要创建的隧道类型："
               rules={[{ required: true, message: '请选择隧道模式' }]}
+              style={{ marginBottom: '8px !important' }}
+              className="tunnel-mode-form-item"
             >
               <div style={{ display: 'flex', gap: '24px', width: '100%' }}>
                 <Card
@@ -404,7 +402,7 @@ const CreateTunnel: React.FC = () => {
                   }}
                   style={{
                     flex: 1,
-                    height: 120,
+                    height: 100,
                     cursor: 'pointer',
                     border: selectedMode === 'server' ? '2px solid var(--card-selected-border)' : '1px solid var(--card-border)',
                     backgroundColor: selectedMode === 'server' ? 'var(--card-selected-bg)' : 'var(--card-bg)',
@@ -413,7 +411,7 @@ const CreateTunnel: React.FC = () => {
                     justifyContent: 'center'
                   }}
                   bodyStyle={{
-                    padding: '16px',
+                    padding: '12px',
                     textAlign: 'center',
                     height: '100%',
                     display: 'flex',
@@ -429,7 +427,7 @@ const CreateTunnel: React.FC = () => {
                     justifyContent: 'center',
                     height: '100%'
                   }}>
-                    <DesktopOutlined style={{ 
+                    <FontAwesomeIcon icon={faServer} style={{ 
                       fontSize: 32, 
                       color: selectedMode === 'server' ? 'var(--card-selected-border)' : 'var(--text-secondary)',
                       marginBottom: 8 
@@ -461,7 +459,7 @@ const CreateTunnel: React.FC = () => {
                   }}
                   style={{
                     flex: 1,
-                    height: 120,
+                    height: 100,
                     cursor: 'pointer',
                     border: selectedMode === 'client' ? '2px solid var(--card-selected-border)' : '1px solid var(--card-border)',
                     backgroundColor: selectedMode === 'client' ? 'var(--card-selected-bg)' : 'var(--card-bg)',
@@ -470,7 +468,7 @@ const CreateTunnel: React.FC = () => {
                     justifyContent: 'center'
                   }}
                   bodyStyle={{
-                    padding: '16px',
+                    padding: '12px',
                     textAlign: 'center',
                     height: '100%',
                     display: 'flex',
@@ -486,7 +484,7 @@ const CreateTunnel: React.FC = () => {
                     justifyContent: 'center',
                     height: '100%'
                   }}>
-                    <LaptopOutlined style={{ 
+                    <FontAwesomeIcon icon={faDesktop} style={{ 
                       fontSize: 32, 
                       color: selectedMode === 'client' ? 'var(--card-selected-border)' : 'var(--text-secondary)',
                       marginBottom: 8 
@@ -517,6 +515,20 @@ const CreateTunnel: React.FC = () => {
             {renderStepContent()}
           </div>
         </Form>
+        
+        {/* 创建按钮 - 直接放在表单下方，无分割线 */}
+        <div style={{ 
+          marginTop: -8
+        }}>
+          <Button 
+            type="primary"
+            onClick={handleSubmit}
+            icon={<CheckCircleOutlined />}
+            block
+          >
+            创建隧道
+          </Button>
+        </div>
       </Card>
 
       {showConfirmModal && (

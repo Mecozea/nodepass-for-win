@@ -1,3 +1,25 @@
+/* 全局样式重置和自定义标题栏适配 */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  overflow: hidden; /* 防止页面级别的滚动条 */
+}
+
+#root {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* 确保Ant Design组件不会产生意外的滚动条 */
+.ant-layout {
+  overflow: hidden;
+}
+
+.ant-layout-content {
+  overflow: auto; /* 只在内容区域允许滚动 */
+}
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em #747bff);
 }
@@ -747,4 +769,198 @@ body {
     margin-left: 0;
     width: 100%;
   }
+}
+
+/* 自定义侧边栏菜单样式 */
+.custom-sidebar-menu {
+  background-color: #F8F9FA !important;
+  border: none !important;
+}
+
+/* 浅色主题下的菜单项样式 */
+.custom-sidebar-menu .ant-menu-item {
+  background-color: transparent !important;
+  color: #131B2C !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 24px !important;
+  height: 40px !important;
+  line-height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  border: none !important;
+}
+
+.custom-sidebar-menu .ant-menu-item:hover {
+  background-color: #e6f4ff !important;
+  color: #131B2C !important;
+}
+
+.custom-sidebar-menu .ant-menu-item-selected {
+  background-color: #131B2C !important;
+  color: #ffffff !important;
+  position: relative !important;
+  width: 100% !important;
+}
+
+.custom-sidebar-menu .ant-menu-item-selected::after {
+  content: '' !important;
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  border-right: 3px solid #1890ff !important;
+}
+
+.custom-sidebar-menu .ant-menu-item-selected:hover {
+  background-color: #131B2C !important;
+  color: #ffffff !important;
+}
+
+/* 浅色主题下的图标颜色 - 更具体的选择器 */
+.custom-sidebar-menu .ant-menu-item .ant-menu-item-icon {
+  color: #131B2C !important;
+  margin-right: 12px !important;
+}
+
+.custom-sidebar-menu .ant-menu-item:hover .ant-menu-item-icon {
+  color: #131B2C !important;
+}
+
+.custom-sidebar-menu .ant-menu-item-selected .ant-menu-item-icon {
+  color: #ffffff !important;
+}
+
+.custom-sidebar-menu .ant-menu-item-selected:hover .ant-menu-item-icon {
+  color: #ffffff !important;
+}
+
+/* 兼容旧版本的anticon选择器 */
+.custom-sidebar-menu .ant-menu-item .anticon {
+  color: #131B2C !important;
+  margin-right: 12px !important;
+}
+
+.custom-sidebar-menu .ant-menu-item:hover .anticon {
+  color: #131B2C !important;
+}
+
+.custom-sidebar-menu .ant-menu-item-selected .anticon {
+  color: #ffffff !important;
+}
+
+.custom-sidebar-menu .ant-menu-item-selected:hover .anticon {
+  color: #ffffff !important;
+}
+
+/* 深色主题下的菜单项样式 */
+[data-theme="dark"] .custom-sidebar-menu {
+  background-color: #1f1f1f !important;
+  border: none !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item {
+  background-color: transparent !important;
+  color: #ffffff !important;
+  width: 100% !important;
+  border: none !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item:hover {
+  background-color: #262626 !important;
+  color: #ffffff !important;
+}
+
+/* 深色模式下选中状态更明显 */
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item-selected {
+  background-color: #1890ff !important;
+  color: #ffffff !important;
+  width: 100% !important;
+  border: none !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item-selected::after {
+  content: '' !important;
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  border-right: 3px solid #40a9ff !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item-selected:hover {
+  background-color: #40a9ff !important;
+  color: #ffffff !important;
+}
+
+/* 深色主题下的图标颜色 */
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item .ant-menu-item-icon {
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item:hover .ant-menu-item-icon {
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item-selected .ant-menu-item-icon {
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item-selected:hover .ant-menu-item-icon {
+  color: #ffffff !important;
+}
+
+/* 深色主题下兼容旧版本的anticon选择器 */
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item .anticon {
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item:hover .anticon {
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item-selected .anticon {
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .custom-sidebar-menu .ant-menu-item-selected:hover .anticon {
+  color: #ffffff !important;
+}
+
+/* 日志页面滚动条样式 */
+.ant-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ant-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.ant-list::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.ant-list::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* 深色主题下的日志滚动条 */
+[data-theme="dark"] .ant-list::-webkit-scrollbar-track {
+  background: #2f2f2f;
+}
+
+[data-theme="dark"] .ant-list::-webkit-scrollbar-thumb {
+  background: #555;
+}
+
+[data-theme="dark"] .ant-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 覆盖创建隧道页面Form.Item的默认margin */
+.tunnel-mode-form-item.ant-form-item {
+  margin-bottom: 8px !important;
 }

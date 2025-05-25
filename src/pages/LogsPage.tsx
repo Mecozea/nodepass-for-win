@@ -1,14 +1,27 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Card, List, Tag, Button, Select, Space, Typography, Empty, Input, message } from 'antd'
-import { DeleteOutlined, FilterOutlined, FileTextOutlined, DownloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faFilter, faSearch, faDownload, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { useLog, LogLevel, LogEntry } from '../context/LogContext'
 
 const { Text, Title } = Typography
 const { Search } = Input
 
-const LogsPage: React.FC = () => {
+interface LogsPageProps {
+  // 移除 onRegisterRefresh 属性
+}
+
+const LogsPage: React.FC<LogsPageProps> = () => {
   const { filteredLogs, clearLogs, filterLevel, setFilterLevel, logs } = useLog()
   const [searchText, setSearchText] = useState('')
+
+  // 刷新日志页面的函数
+  const refreshLogs = () => {
+    // 这里可以添加刷新日志的逻辑，比如重新获取日志等
+    // 目前日志是实时更新的，所以刷新操作可以是清空搜索或重置筛选
+    setSearchText('')
+    setFilterLevel('all')
+  }
 
   const getLevelColor = (level: LogLevel) => {
     switch (level) {
@@ -20,23 +33,16 @@ const LogsPage: React.FC = () => {
     }
   }
 
-  const formatTime = (timestamp: Date) => {
-    const timeStr = timestamp.toLocaleTimeString('zh-CN', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    })
-    const ms = timestamp.getMilliseconds().toString().padStart(3, '0')
-    return `${timeStr}.${ms}`
-  }
-
-  const formatDate = (timestamp: Date) => {
-    return timestamp.toLocaleDateString('zh-CN', {
+  const formatDateTime = (timestamp: Date) => {
+    return timestamp.toLocaleString('zh-CN', {
       year: 'numeric',
       month: '2-digit',
-      day: '2-digit'
-    })
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).replace(/\//g, '-')
   }
 
   // 导出日志功能
@@ -77,12 +83,8 @@ const LogsPage: React.FC = () => {
     ) : filteredLogs
 
   return (
-    <div>
-      <Title level={2} style={{ marginBottom: 24 }}>
-        应用日志
-      </Title>
-
-      <Card>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Card style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* 工具栏 */}
         <div style={{ 
           marginBottom: 16, 
@@ -90,10 +92,11 @@ const LogsPage: React.FC = () => {
           justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
-          gap: 16
+          gap: 16,
+          flexShrink: 0
         }}>
           <Space wrap>
-            <FilterOutlined />
+            <FontAwesomeIcon icon={faFilter} />
             <Text>级别筛选:</Text>
             <Select
               value={filterLevel}
@@ -115,7 +118,7 @@ const LogsPage: React.FC = () => {
               onChange={(e) => setSearchText(e.target.value)}
               style={{ width: 200 }}
               size="small"
-              prefix={<SearchOutlined />}
+              prefix={<FontAwesomeIcon icon={faSearch} />}
             />
           </Space>
           
@@ -124,7 +127,7 @@ const LogsPage: React.FC = () => {
               显示 {displayLogs.length} / {logs.length} 条日志
             </Text>
             <Button 
-              icon={<DownloadOutlined />} 
+              icon={<FontAwesomeIcon icon={faDownload} />} 
               onClick={exportLogs}
               size="small"
               disabled={displayLogs.length === 0}
@@ -132,7 +135,7 @@ const LogsPage: React.FC = () => {
               导出
             </Button>
             <Button 
-              icon={<DeleteOutlined />} 
+              icon={<FontAwesomeIcon icon={faTrash} />} 
               onClick={clearLogs}
               size="small"
               danger
@@ -142,82 +145,76 @@ const LogsPage: React.FC = () => {
           </Space>
         </div>
 
-        {/* 日志列表 */}
-        {displayLogs.length === 0 ? (
-          <Empty 
-            description={searchText ? "未找到匹配的日志" : "暂无日志"}
-            style={{ margin: '40px 0' }}
-          />
-        ) : (
-          <List
-            dataSource={displayLogs}
-            renderItem={(log: LogEntry) => (
-              <List.Item style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
-                <div style={{ width: '100%' }}>
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    marginBottom: 6,
-                    gap: 8
-                  }}>
-                    <Text 
-                      type="secondary" 
-                      style={{ 
-                        fontSize: '11px',
-                        fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
-                        minWidth: '70px'
-                      }}
-                    >
-                      {formatDate(log.timestamp)}
-                    </Text>
-                    <Text 
-                      type="secondary" 
-                      style={{ 
-                        fontSize: '12px',
-                        fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
-                        minWidth: '90px'
-                      }}
-                    >
-                      {formatTime(log.timestamp)}
-                    </Text>
-                    <Tag 
-                      color={getLevelColor(log.level)}
-                      style={{ 
-                        fontSize: '11px',
-                        minWidth: '50px',
-                        textAlign: 'center',
-                        margin: 0
-                      }}
-                    >
-                      {log.level.toUpperCase()}
-                    </Tag>
-                    {log.source && (
+        {/* 日志列表容器 */}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          {displayLogs.length === 0 ? (
+            <Empty 
+              description={searchText ? "未找到匹配的日志" : "暂无日志"}
+              style={{ margin: '40px 0' }}
+            />
+          ) : (
+            <List
+              dataSource={displayLogs}
+              renderItem={(log: LogEntry) => (
+                <List.Item style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <div style={{ width: '100%' }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 8,
+                      flexWrap: 'wrap'
+                    }}>
                       <Tag 
-                        color="default"
+                        color={getLevelColor(log.level)}
                         style={{ 
                           fontSize: '11px',
+                          minWidth: '50px',
+                          textAlign: 'center',
                           margin: 0
                         }}
                       >
-                        {log.source}
+                        {log.level.toUpperCase()}
                       </Tag>
-                    )}
+                      <Text 
+                        type="secondary" 
+                        style={{ 
+                          fontSize: '11px',
+                          fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace'
+                        }}
+                      >
+                        {formatDateTime(log.timestamp)}
+                      </Text>
+                      {log.source && (
+                        <Tag 
+                          color="default"
+                          style={{ 
+                            fontSize: '11px',
+                            margin: 0
+                          }}
+                        >
+                          {log.source}
+                        </Tag>
+                      )}
+                      <span style={{ 
+                        fontSize: '13px',
+                        lineHeight: '1.5',
+                        wordBreak: 'break-word',
+                        fontFamily: log.level === 'error' ? 'Monaco, Menlo, "Ubuntu Mono", monospace' : 'inherit'
+                      }}>
+                        {log.message}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{ 
-                    fontSize: '13px',
-                    lineHeight: '1.5',
-                    wordBreak: 'break-word',
-                    fontFamily: log.level === 'error' ? 'Monaco, Menlo, "Ubuntu Mono", monospace' : 'inherit',
-                    paddingLeft: '168px'
-                  }}>
-                    {log.message}
-                  </div>
-                </div>
-              </List.Item>
-            )}
-            style={{ maxHeight: '70vh', overflowY: 'auto' }}
-          />
-        )}
+                </List.Item>
+              )}
+              style={{ 
+                height: '100%', 
+                overflowY: 'auto',
+                paddingRight: '8px' // 为滚动条留出空间
+              }}
+            />
+          )}
+        </div>
       </Card>
     </div>
   )

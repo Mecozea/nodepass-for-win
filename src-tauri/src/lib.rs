@@ -787,35 +787,101 @@ async fn update_tray_tooltip(_app_handle: AppHandle, _state: tauri::State<'_, Ap
 }
 
 #[tauri::command]
-async fn set_window_theme(app_handle: AppHandle, theme: String) -> Result<(), String> {
+async fn set_window_theme(app_handle: AppHandle, _theme: String) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
-        match theme.as_str() {
-            "dark" => {
-                #[cfg(target_os = "windows")]
-                {
-                    // 在Windows上设置深色主题
-                    let _ = window.set_theme(Some(tauri::Theme::Dark));
-                }
-            }
-            "light" => {
-                #[cfg(target_os = "windows")]
-                {
-                    // 在Windows上设置浅色主题
-                    let _ = window.set_theme(Some(tauri::Theme::Light));
-                }
-            }
-            _ => {
-                // auto模式，跟随系统
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = window.set_theme(None);
-                }
-            }
+        #[cfg(target_os = "windows")]
+        {
+            // 基于Tauri v2官方文档，设置窗口主题为深色
+            // 这将确保系统框颜色为深色，对应#131B2C的深色主题
+            let _ = window.set_theme(Some(tauri::Theme::Dark));
+            
+            // 可选：设置窗口装饰（如果需要自定义标题栏）
+            // let _ = window.set_decorations(false);
+            
+            // 可选：设置窗口阴影
+            // let _ = window.set_shadow(true);
         }
+        
+        #[cfg(target_os = "macos")]
+        {
+            // macOS平台也设置深色主题
+            let _ = window.set_theme(Some(tauri::Theme::Dark));
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            // Linux平台设置深色主题
+            let _ = window.set_theme(Some(tauri::Theme::Dark));
+        }
+        
         Ok(())
     } else {
         Err("窗口未找到".to_string())
     }
+}
+
+// 新增：专门用于初始化窗口主题的函数
+#[tauri::command]
+async fn initialize_window_theme(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        // 强制设置为深色主题，确保系统框颜色为深色
+        let _ = window.set_theme(Some(tauri::Theme::Dark));
+        
+        #[cfg(target_os = "windows")]
+        {
+            // Windows特定的窗口设置
+            // 确保窗口使用深色标题栏
+            let _ = window.set_theme(Some(tauri::Theme::Dark));
+        }
+        
+        Ok(())
+    } else {
+        Err("窗口未找到".to_string())
+    }
+}
+
+// 新增：请求关闭窗口的函数
+#[tauri::command]
+async fn request_close(app_handle: AppHandle) -> Result<(), String> {
+    // 发送关闭确认事件到前端
+    let _ = app_handle.emit("close-requested", ());
+    Ok(())
+}
+
+// 新增：获取应用版本信息的函数
+#[tauri::command]
+async fn get_app_version() -> Result<String, String> {
+    Ok(env!("CARGO_PKG_VERSION").to_string())
+}
+
+// 新增：在默认浏览器中打开URL
+#[tauri::command]
+async fn open_url_in_default_browser(url: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(&["/c", "start", &url])
+            .spawn()
+            .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    }
+    
+    Ok(())
 }
 
 fn load_configs(config_file: &PathBuf) -> Result<Vec<NodePassConfig>, Box<dyn std::error::Error>> {
@@ -1145,6 +1211,40 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
             
+            // 基于Tauri v2官方文档设置窗口主题
+            if let Some(window) = app.get_webview_window("main") {
+                // 立即设置深色主题，确保系统框颜色为深色（对应#131B2C）
+                let _ = window.set_theme(Some(tauri::Theme::Dark));
+                
+                #[cfg(target_os = "windows")]
+                {
+                    // Windows平台特定设置
+                    // 确保窗口标题栏使用深色主题
+                    let _ = window.set_theme(Some(tauri::Theme::Dark));
+                    
+                    // 使用自定义标题栏，decorations已在tauri.conf.json中设置为false
+                    // 自定义标题栏颜色为#131B2C，确保视觉一致性
+                }
+                
+                // 在窗口加载完成后再次确认主题设置
+                let window_clone = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    // 等待前端加载完成
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    
+                    // 再次确保深色主题设置
+                    let _ = window_clone.set_theme(Some(tauri::Theme::Dark));
+                    
+                    // 发送主题初始化事件到前端
+                    let _ = window_clone.emit("window-theme-initialized", serde_json::json!({
+                        "theme": "dark",
+                        "systemFrame": "#131B2C",
+                        "decorations": false,
+                        "customTitlebar": true
+                    }));
+                });
+            }
+            
             // 创建托盘菜单
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit])?;
@@ -1232,7 +1332,11 @@ pub fn run() {
             get_running_tunnels_count,
             exit_app,
             update_tray_tooltip,
-            set_window_theme
+            set_window_theme,
+            initialize_window_theme,
+            request_close,
+            get_app_version,
+            open_url_in_default_browser
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

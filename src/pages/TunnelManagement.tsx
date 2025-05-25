@@ -1,23 +1,22 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Space, Tag, Modal, message, Card, Tooltip, Popconfirm, Row, Col, Statistic, List, Typography } from 'antd'
+import { Table, Button, Space, Tag, Modal, message, Card, Tooltip, Popconfirm, Row, Col, Statistic, List, Typography, Input, Radio } from 'antd'
 import { 
-  PlayCircleOutlined, 
-  PauseCircleOutlined, 
-  DeleteOutlined, 
-  ReloadOutlined,
   PlusOutlined,
   DatabaseOutlined,
   ExclamationCircleOutlined,
-  FileTextOutlined,
   CheckCircleOutlined,
   StopOutlined,
   WarningOutlined
 } from '@ant-design/icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faPlay, faEye, faPause, faTrash, faTh, faList, faSync, faSearch, faPlus } from '@fortawesome/free-solid-svg-icons'
 import { useNavigate } from 'react-router-dom'
 import { configManager, TunnelConfig } from '../utils/config'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useLog } from '../context/LogContext'
+import { useSettings } from '../context/SettingsContext'
+import { useTunnel } from '../context/TunnelContext'
 
 const { Text } = Typography
 
@@ -44,7 +43,7 @@ const StatCard: React.FC<{
         transition: 'all 0.3s ease',
         cursor: 'pointer'
       }}
-      bodyStyle={{ padding: '20px' }}
+      bodyStyle={{ padding: '16px' }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -52,15 +51,15 @@ const StatCard: React.FC<{
         <div>
           <div style={{ 
             color: textColor === '#fff' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.6)', 
-            fontSize: '14px', 
-            marginBottom: '8px',
+            fontSize: '13px', 
+            marginBottom: '6px',
             fontWeight: '500'
           }}>
             {title}
           </div>
           <div style={{ 
             color: textColor, 
-            fontSize: '32px', 
+            fontSize: '28px', 
             fontWeight: 'bold',
             lineHeight: '1'
           }}>
@@ -70,8 +69,8 @@ const StatCard: React.FC<{
         <div style={{ 
           backgroundColor: iconBgColor,
           borderRadius: '50%',
-          width: '48px',
-          height: '48px',
+          width: '42px',
+          height: '42px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -79,7 +78,7 @@ const StatCard: React.FC<{
           transition: 'transform 0.3s ease'
         }}>
           {React.cloneElement(icon as React.ReactElement, { 
-            style: { fontSize: '24px', color: textColor } 
+            style: { fontSize: '20px', color: textColor } 
           })}
         </div>
       </div>
@@ -111,9 +110,15 @@ interface ProcessErrorEvent {
   error: string
 }
 
-const TunnelManagement: React.FC = () => {
+interface TunnelManagementProps {
+  // 移除 onRegisterRefresh 属性
+}
+
+const TunnelManagement: React.FC<TunnelManagementProps> = () => {
   const navigate = useNavigate()
   const { addLog } = useLog()
+  const { isDarkMode } = useSettings()
+  const { refreshTrigger } = useTunnel()
   const [tunnels, setTunnels] = useState<TunnelConfig[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedTunnel, setSelectedTunnel] = useState<TunnelConfig | null>(null)
@@ -128,6 +133,16 @@ const TunnelManagement: React.FC = () => {
     error: 0
   })
   const [tunnelStartTimes, setTunnelStartTimes] = useState<Map<string, number>>(new Map())
+  const [searchText, setSearchText] = useState('')
+  const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
+
+  // 过滤隧道列表
+  const filteredTunnels = tunnels.filter(tunnel => 
+    tunnel.name.toLowerCase().includes(searchText.toLowerCase()) ||
+    tunnel.tunnelAddr.toLowerCase().includes(searchText.toLowerCase()) ||
+    tunnel.targetAddr.toLowerCase().includes(searchText.toLowerCase()) ||
+    tunnel.mode.toLowerCase().includes(searchText.toLowerCase())
+  )
 
   // 自动滚动到日志底部
   const scrollToBottom = () => {
@@ -294,6 +309,23 @@ const TunnelManagement: React.FC = () => {
   useEffect(() => {
     loadTunnels()
   }, [])
+
+  // 监听刷新触发器
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      loadTunnels()
+    }
+  }, [refreshTrigger])
+
+  // 刷新隧道列表（带反馈）
+  const handleRefresh = async () => {
+    try {
+      await loadTunnels()
+      message.success('隧道列表已刷新')
+    } catch (error) {
+      message.error(`刷新失败: ${error}`)
+    }
+  }
 
   // 启动隧道
   const handleStart = async (tunnel: TunnelConfig) => {
@@ -462,22 +494,27 @@ const TunnelManagement: React.FC = () => {
   const getModeTag = (mode: string) => {
     switch (mode) {
       case 'server':
-        return <Tag color="blue">服务器</Tag>
+        return <Tag color="blue" style={{ margin: 0 }}>服务器</Tag>
       case 'client':
-        return <Tag color="green">客户端</Tag>
+        return <Tag color="green" style={{ margin: 0 }}>客户端</Tag>
       case 'master':
-        return <Tag color="purple">主控</Tag>
+        return <Tag color="purple" style={{ margin: 0 }}>主控</Tag>
       default:
-        return <Tag>未知</Tag>
+        return <Tag style={{ margin: 0 }}>未知</Tag>
     }
   }
 
+  // 表格列配置
   const columns = [
     {
-      title: '隧道名称',
+      title: (
+        <div style={{ marginLeft: '8px' }}>
+          隧道名称
+        </div>
+      ),
       dataIndex: 'name',
       key: 'name',
-      width: 160,
+      width: 180,
       render: (name: string, record: TunnelConfig) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {/* 状态圆点 */}
@@ -492,7 +529,8 @@ const TunnelManagement: React.FC = () => {
               border: '2px solid #fff',
               boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
               cursor: 'help',
-              flexShrink: 0
+              flexShrink: 0,
+              marginLeft: '8px'
             }}
             title={`状态: ${record.status === 'running' ? '运行中' : record.status === 'error' ? '错误' : '已停止'} | PID: ${record.processId || '-'}`}
           />
@@ -504,48 +542,37 @@ const TunnelManagement: React.FC = () => {
       ),
     },
     {
-      title: '协议',
-      dataIndex: 'protocol',
-      key: 'protocol',
-      width: 60,
-      render: (protocol: string) => (
-        <Tag color={protocol === 'tcp' ? 'blue' : 'orange'}>
-          {protocol?.toUpperCase() || 'TCP'}
-        </Tag>
-      ),
-    },
-    {
       title: '隧道地址',
       dataIndex: 'tunnelAddr',
       key: 'tunnelAddr',
-      width: 140,
+      width: 160,
     },
     {
       title: '目标地址',
       dataIndex: 'targetAddr',
       key: 'targetAddr',
-      width: 140,
+      width: 160,
     },
     {
       title: '创建时间',
       dataIndex: 'createdAt',
       key: 'createdAt',
-      width: 140,
+      width: 160,
       render: (createdAt: string) => formatDateTime(createdAt),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 110,
+      width: 120,
       render: (_: any, record: TunnelConfig) => (
         <Space size="small">
           <Tooltip title="查看日志">
             <Button
               size="small"
-              type="primary"
-              icon={<FileTextOutlined />}
+              type="default"
+              icon={<FontAwesomeIcon icon={faEye} />}
               onClick={() => handleViewLogs(record)}
-              style={{ backgroundColor: '#1890ff', borderColor: '#1890ff' }}
+              style={{ color: '#1890ff', borderColor: '#1890ff' }}
             />
           </Tooltip>
           
@@ -553,12 +580,12 @@ const TunnelManagement: React.FC = () => {
             <Tooltip title="停止隧道">
               <Button
                 size="small"
-                icon={<PauseCircleOutlined />}
+                type="default"
+                icon={<FontAwesomeIcon icon={faPause} />}
                 onClick={() => handleStop(record)}
                 style={{ 
-                  backgroundColor: '#faad14', 
-                  borderColor: '#faad14',
-                  color: '#fff'
+                  color: '#faad14', 
+                  borderColor: '#faad14'
                 }}
               />
             </Tooltip>
@@ -566,10 +593,10 @@ const TunnelManagement: React.FC = () => {
             <Tooltip title="启动隧道">
               <Button
                 size="small"
-                type="primary"
-                icon={<PlayCircleOutlined />}
+                type="default"
+                icon={<FontAwesomeIcon icon={faPlay} />}
                 onClick={() => handleStart(record)}
-                style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
+                style={{ color: '#52c41a', borderColor: '#52c41a' }}
               />
             </Tooltip>
           )}
@@ -585,11 +612,11 @@ const TunnelManagement: React.FC = () => {
             <Tooltip title="删除隧道">
               <Button
                 size="small"
-                icon={<DeleteOutlined />}
+                type="default"
+                icon={<FontAwesomeIcon icon={faTrash} />}
                 style={{ 
-                  backgroundColor: '#ff4d4f', 
-                  borderColor: '#ff4d4f',
-                  color: '#fff'
+                  color: '#ff4d4f', 
+                  borderColor: '#ff4d4f'
                 }}
               />
             </Tooltip>
@@ -601,30 +628,8 @@ const TunnelManagement: React.FC = () => {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1>隧道管理</h1>
-        <Space>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={loadTunnels}
-            loading={loading}
-            size="large"
-          >
-            刷新
-          </Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => navigate('/create-tunnel')}
-            size="large"
-          >
-            创建隧道
-          </Button>
-        </Space>
-      </div>
-
-      {/* 统计卡片 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+      {/* 统计卡片 - 减少间距 */}
+      <Row gutter={[12, 12]} style={{ marginBottom: 20 }}>
         <Col xs={24} sm={12} lg={6}>
           <StatCard
             title="总实例"
@@ -666,23 +671,227 @@ const TunnelManagement: React.FC = () => {
         </Col>
       </Row>
 
-      <Table
-        columns={columns}
-        dataSource={tunnels}
-        loading={loading}
-        rowKey="id"
-        pagination={false}
-        style={{
-          borderRadius: '8px',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
-        }}
-      />
+      {/* 搜索框和视图切换 */}
+      <div style={{ 
+        marginBottom: 16, 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        gap: 16
+      }}>
+        <Input
+          placeholder="搜索隧道..."
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          prefix={<FontAwesomeIcon icon={faSearch} />}
+          allowClear
+          style={{ maxWidth: 400 }}
+        />
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Tooltip title="刷新隧道列表">
+            <Button
+              icon={<FontAwesomeIcon icon={faSync} />}
+              onClick={handleRefresh}
+              loading={loading}
+            >
+              刷新
+            </Button>
+          </Tooltip>
+          <Button
+            type="primary"
+            icon={<FontAwesomeIcon icon={faPlus} />}
+            onClick={() => navigate('/create-tunnel')}
+            style={{
+              backgroundColor: '#1890ff',
+              borderColor: '#1890ff',
+            }}
+          >
+            创建
+          </Button>
+          <Radio.Group 
+            value={viewMode} 
+            onChange={(e) => setViewMode(e.target.value)}
+            buttonStyle="solid"
+          >
+            <Radio.Button value="card">
+              <FontAwesomeIcon icon={faTh} /> 
+            </Radio.Button>
+            <Radio.Button value="table">
+              <FontAwesomeIcon icon={faList} /> 
+            </Radio.Button>
+          </Radio.Group>
+          
+       
+        </div>
+      </div>
+
+      {/* 隧道列表 */}
+      {viewMode === 'card' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '40px' }}>
+              <span>加载中...</span>
+            </div>
+          ) : filteredTunnels.length === 0 ? (
+            <div style={{ 
+              textAlign: 'center', 
+              padding: '40px',
+              backgroundColor: isDarkMode ? '#1f1f1f' : '#fff',
+              borderRadius: '8px',
+              border: isDarkMode ? '1px solid #303030' : '1px solid #f0f0f0',
+              color: isDarkMode ? '#d9d9d9' : '#000'
+            }}>
+              {searchText ? '未找到匹配的隧道' : '暂无隧道，点击右上角创建隧道'}
+            </div>
+          ) : (
+            filteredTunnels.map((tunnel) => (
+              <div
+                key={tunnel.id}
+                style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between',
+                  padding: '16px',
+                  backgroundColor: isDarkMode ? '#1f1f1f' : '#fff',
+                  borderRadius: '8px',
+                  border: isDarkMode ? '1px solid #303030' : '1px solid #f0f0f0',
+                  boxShadow: isDarkMode ? '0 1px 3px rgba(0, 0, 0, 0.3)' : '0 1px 3px rgba(0, 0, 0, 0.1)',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.boxShadow = isDarkMode ? '0 2px 8px rgba(0, 0, 0, 0.4)' : '0 2px 8px rgba(0, 0, 0, 0.15)'
+                  e.currentTarget.style.transform = 'translateY(-1px)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.boxShadow = isDarkMode ? '0 1px 3px rgba(0, 0, 0, 0.3)' : '0 1px 3px rgba(0, 0, 0, 0.1)'
+                  e.currentTarget.style.transform = 'translateY(0)'
+                }}
+              >
+                {/* 左侧：隧道信息 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+                  {/* 状态圆点和隧道类型 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div 
+                      style={{
+                        width: '12px',
+                        height: '12px',
+                        borderRadius: '50%',
+                        backgroundColor: 
+                          tunnel.status === 'running' ? '#52c41a' :
+                          tunnel.status === 'error' ? '#ff4d4f' : '#d9d9d9',
+                        border: '2px solid #fff',
+                        boxShadow: '0 0 0 1px rgba(0,0,0,0.1)',
+                        cursor: 'help',
+                        flexShrink: 0
+                      }}
+                      title={`状态: ${tunnel.status === 'running' ? '运行中' : tunnel.status === 'error' ? '错误' : '已停止'} | PID: ${tunnel.processId || '-'}`}
+                    />
+                    {getModeTag(tunnel.mode)}
+                  </div>
+                  
+                  {/* 隧道信息 */}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ 
+                      fontWeight: 'bold', 
+                      fontSize: '14px', 
+                      marginBottom: '2px',
+                      color: isDarkMode ? '#fff' : '#000'
+                    }}>
+                      {tunnel.name}
+                    </div>
+                    <div style={{ 
+                      fontSize: '12px', 
+                      color: isDarkMode ? '#999' : '#666'
+                    }}>
+                      {tunnel.mode}://{tunnel.tunnelAddr}/{tunnel.targetAddr}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 右侧：操作按钮 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Tooltip title="查看日志">
+                    <Button
+                      size="small"
+                      type="default"
+                      icon={<FontAwesomeIcon icon={faEye} />}
+                      onClick={() => handleViewLogs(tunnel)}
+                      style={{ color: '#1890ff', borderColor: '#1890ff' }}
+                    />
+                  </Tooltip>
+                  
+                  {tunnel.status === 'running' ? (
+                    <Tooltip title="停止隧道">
+                      <Button
+                        size="small"
+                        type="default"
+                        icon={<FontAwesomeIcon icon={faPause} />}
+                        onClick={() => handleStop(tunnel)}
+                        style={{ 
+                          color: '#faad14', 
+                          borderColor: '#faad14'
+                        }}
+                      />
+                    </Tooltip>
+                  ) : (
+                    <Tooltip title="启动隧道">
+                      <Button
+                        size="small"
+                        type="default"
+                        icon={<FontAwesomeIcon icon={faPlay} />}
+                        onClick={() => handleStart(tunnel)}
+                        style={{ color: '#52c41a', borderColor: '#52c41a' }}
+                      />
+                    </Tooltip>
+                  )}
+                  
+                  <Popconfirm
+                    title="确认删除"
+                    description={`确定要删除隧道 "${tunnel.name}" 吗？此操作无法撤销。`}
+                    onConfirm={() => handleDelete(tunnel)}
+                    okText="确认删除"
+                    cancelText="取消"
+                    okType="danger"
+                  >
+                    <Tooltip title="删除隧道">
+                      <Button
+                        size="small"
+                        type="default"
+                        icon={<FontAwesomeIcon icon={faTrash} />}
+                        style={{ 
+                          color: '#ff4d4f', 
+                          borderColor: '#ff4d4f'
+                        }}
+                      />
+                    </Tooltip>
+                  </Popconfirm>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <Table
+          columns={columns}
+          dataSource={filteredTunnels}
+          loading={loading}
+          rowKey="id"
+          pagination={false}
+          size="middle"
+          showHeader={true}
+          style={{
+            borderRadius: '8px',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+          }}
+        />
+      )}
 
       {/* 日志查看模态框 */}
       <Modal
         title={
           <Space>
-            <FileTextOutlined />
+            <FontAwesomeIcon icon={faEye} />
             <span>隧道日志 - {selectedTunnel?.name}</span>
           </Space>
         }

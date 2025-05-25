@@ -1,21 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Card, Button, Tag, Space, Modal, message, Alert, Switch, Radio, Divider } from 'antd'
-import {
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
-  DownloadOutlined,
-  ReloadOutlined,
-  GithubOutlined,
-  SettingOutlined,
-  BgColorsOutlined,
-  AppstoreOutlined,
-  SunOutlined,
-  MoonOutlined,
-  DesktopOutlined,
-  RightOutlined,
-  MenuOutlined,
-  MenuUnfoldOutlined,
-} from '@ant-design/icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { 
+  faCheckCircle, 
+  faExclamationTriangle, 
+  faDownload, 
+  faSync, 
+  faCog, 
+  faPalette, 
+  faSun, 
+  faMoon, 
+  faDesktop, 
+  faChevronRight
+} from '@fortawesome/free-solid-svg-icons'
+import { faGithub } from '@fortawesome/free-brands-svg-icons'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useSettings } from '../context/SettingsContext'
@@ -80,12 +78,17 @@ const SettingItem: React.FC<{
   </div>
 )
 
-const SystemSettings: React.FC = () => {
+interface SystemSettingsProps {
+  // 移除 onRegisterRefresh 属性
+}
+
+const SystemSettings: React.FC<SystemSettingsProps> = () => {
   const [nodePassStatus, setNodePassStatus] = useState<NodePassStatus | null>(null)
   const [latestRelease, setLatestRelease] = useState<GitHubRelease | null>(null)
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null)
   const [showDownloadModal, setShowDownloadModal] = useState(false)
   const [checkingStatus, setCheckingStatus] = useState(false)
+  const [appVersion, setAppVersion] = useState<string>('0.0.1')
   
   // 从Context获取设置和日志
   const { settings, updateSettings, theme, setTheme, isTopNav, setIsTopNav } = useSettings()
@@ -117,6 +120,7 @@ const SystemSettings: React.FC = () => {
 
     // 初始检查状态
     checkNodePassStatus()
+    getAppVersion()
 
     return () => {
       unlistenDownload.then(fn => fn())
@@ -136,6 +140,16 @@ const SystemSettings: React.FC = () => {
       })
     } finally {
       setCheckingStatus(false)
+    }
+  }
+
+  const getAppVersion = async () => {
+    try {
+      const version = await invoke<string>('get_app_version')
+      setAppVersion(version)
+    } catch (error) {
+      console.error('获取应用版本失败:', error)
+      // 保持默认版本 0.0.1
     }
   }
 
@@ -205,9 +219,9 @@ const SystemSettings: React.FC = () => {
 
   const getStatusTag = (status: NodePassStatus) => {
     if (status.installed) {
-      return <Tag color="success" icon={<CheckCircleOutlined />}>已安装</Tag>
+      return <Tag color="success" icon={<FontAwesomeIcon icon={faCheckCircle} />}>已安装</Tag>
     } else {
-      return <Tag color="error" icon={<ExclamationCircleOutlined />}>未安装</Tag>
+      return <Tag color="error" icon={<FontAwesomeIcon icon={faExclamationTriangle} />}>未安装</Tag>
     }
   }
 
@@ -305,8 +319,6 @@ const SystemSettings: React.FC = () => {
 
   return (
     <div>
-      <h1 style={{ marginBottom: 24 }}>系统设置</h1>
-
       <div ref={containerRef} style={{ position: 'relative' }}>
         {/* 左列 */}
         <div style={getColumnStyle(0)}>
@@ -314,7 +326,7 @@ const SystemSettings: React.FC = () => {
           <Card 
             title={
               <Space>
-                <SettingOutlined />
+                <FontAwesomeIcon icon={faCog} />
                 <span>NodePass 核心</span>
               </Space>
             }
@@ -372,7 +384,7 @@ const SystemSettings: React.FC = () => {
                     <Tag>检测中...</Tag>
                   )}
                   <Button 
-                    icon={<ReloadOutlined />} 
+                    icon={<FontAwesomeIcon icon={faSync} />} 
                     onClick={checkNodePassStatus}
                     loading={checkingStatus}
                     size="small"
@@ -381,34 +393,29 @@ const SystemSettings: React.FC = () => {
                 </Space>
               </SettingItem>
 
-              {nodePassStatus?.path && (
-                <SettingItem 
-                  label="文件路径"
-                  description={
-                    nodePassStatus.path.includes('resources') ? '应用资源目录' :
-                    nodePassStatus.path.includes('nodepass-gui') ? '开发目录' : '系统PATH'
-                  }
+              <SettingItem 
+                label="应用版本"
+                description="NodePass GUI 当前版本号"
+              >
+                <Button 
+                  type="text" 
+                  size="small"
+                  style={{ 
+                    color: '#1890ff',
+                    backgroundColor: '#e6f7ff',
+                    border: '1px solid #91d5ff',
+                    borderRadius: '4px',
+                    fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    padding: '2px 8px',
+                    height: 'auto',
+                    lineHeight: '1.2'
+                  }}
                 >
-                  <Button 
-                    type="text" 
-                    icon={<RightOutlined />}
-                    size="small"
-                    onClick={async () => {
-                      try {
-                        const path = nodePassStatus.path!;
-                        const directory = path.substring(0, path.lastIndexOf('\\'));
-                        // 使用系统命令打开目录
-                        await invoke('open_directory', { path: directory });
-                      } catch (error) {
-                        message.error('打开目录失败');
-                        console.error('打开目录错误:', error);
-                      }
-                    }}
-                  >
-                    打开目录
-                  </Button>
-                </SettingItem>
-              )}
+                  v{appVersion}
+                </Button>
+              </SettingItem>
 
               {nodePassStatus?.error && (
                 <div style={{ marginTop: 16 }}>
@@ -427,7 +434,7 @@ const SystemSettings: React.FC = () => {
           <Card 
             title={
               <Space>
-                <BgColorsOutlined />
+                <FontAwesomeIcon icon={faPalette} />
                 <span>主题设置</span>
               </Space>
             }
@@ -448,28 +455,15 @@ const SystemSettings: React.FC = () => {
                   size="small"
                 >
                   <Radio.Button value="light">
-                    <SunOutlined />
+                    <FontAwesomeIcon icon={faSun} />
                   </Radio.Button>
                   <Radio.Button value="dark">
-                    <MoonOutlined />
+                    <FontAwesomeIcon icon={faMoon} />
                   </Radio.Button>
                   <Radio.Button value="auto">
-                    <DesktopOutlined />
+                    <FontAwesomeIcon icon={faDesktop} />
                   </Radio.Button>
                 </Radio.Group>
-              </SettingItem>
-
-              <SettingItem 
-                label="色彩方案"
-                description="自定义应用配色主题"
-              >
-                <Button 
-                  type="text" 
-                  icon={<RightOutlined />}
-                  size="small"
-                >
-                  自定义
-                </Button>
               </SettingItem>
 
               <SettingItem 
@@ -499,7 +493,7 @@ const SystemSettings: React.FC = () => {
           <Card 
             title={
               <Space>
-                <SettingOutlined />
+                <FontAwesomeIcon icon={faCog} />
                 <span>高级设置</span>
               </Space>
             }
@@ -510,14 +504,20 @@ const SystemSettings: React.FC = () => {
                 label="开机自启"
                 description="系统启动时自动运行 NodePass GUI"
               >
-                <Switch size="small" />
+                <Switch 
+                  size="small" 
+                  onChange={() => message.info('此功能正在开发中')}
+                />
               </SettingItem>
 
               <SettingItem 
                 label="最小化到托盘"
                 description="关闭窗口时最小化到系统托盘"
               >
-                <Switch size="small" />
+                <Switch 
+                  size="small" 
+                  onChange={() => message.info('此功能正在开发中')}
+                />
               </SettingItem>
 
               <SettingItem 
@@ -526,8 +526,9 @@ const SystemSettings: React.FC = () => {
               >
                 <Button 
                   type="text" 
-                  icon={<RightOutlined />}
+                  icon={<FontAwesomeIcon icon={faChevronRight} />}
                   size="small"
+                  onClick={() => message.info('此功能正在开发中')}
                 >
                   配置
                 </Button>
@@ -539,8 +540,9 @@ const SystemSettings: React.FC = () => {
               >
                 <Button 
                   type="text" 
-                  icon={<RightOutlined />}
+                  icon={<FontAwesomeIcon icon={faChevronRight} />}
                   size="small"
+                  onClick={() => message.info('此功能正在开发中')}
                 >
                   导出
                 </Button>
@@ -552,7 +554,7 @@ const SystemSettings: React.FC = () => {
               >
                 <Button 
                   type="text" 
-                  icon={<RightOutlined />}
+                  icon={<FontAwesomeIcon icon={faSync} />}
                   size="small"
                   onClick={testNetworkConnection}
                 >
@@ -568,7 +570,7 @@ const SystemSettings: React.FC = () => {
       <Modal
         title={
           <Space>
-            <GithubOutlined />
+            <FontAwesomeIcon icon={faGithub} />
             <span>NodePass 核心 {latestRelease?.tag_name || ''}</span>
           </Space>
         }
@@ -607,7 +609,7 @@ const SystemSettings: React.FC = () => {
               </Button>
               <Button 
                 type="primary"
-                icon={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting' ? undefined : <DownloadOutlined />}
+                icon={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting' ? undefined : <FontAwesomeIcon icon={faDownload} />}
                 onClick={downloadSystemAppropriate}
                 disabled={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting' || downloadProgress?.status === 'completed'}
                 loading={downloadProgress?.status === 'downloading' || downloadProgress?.status === 'extracting'}
@@ -647,7 +649,7 @@ const SystemSettings: React.FC = () => {
                 </div>
                 <Button 
                   type="link" 
-                  icon={<GithubOutlined />}
+                  icon={<FontAwesomeIcon icon={faGithub} />}
                   href={latestRelease.html_url}
                   target="_blank"
                   size="small"
