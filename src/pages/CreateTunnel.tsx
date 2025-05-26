@@ -1,12 +1,12 @@
 import React, { useState } from 'react'
-import { Card, Button, Form, Input, Select, Space, message, Row, Col, Modal } from 'antd'
+import { Card, Button, Form, Input, Select, Space, message, Row, Col, Modal, Radio } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import {
   CheckCircleOutlined,
   CopyOutlined,
 } from '@ant-design/icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faServer, faDesktop } from '@fortawesome/free-solid-svg-icons'
+import { faServer, faDesktop, faGear } from '@fortawesome/free-solid-svg-icons'
 import { configManager } from '../utils/config'
 import { invoke } from '@tauri-apps/api/core'
 import { useLog } from '../context/LogContext'
@@ -24,6 +24,7 @@ interface CreateTunnelForm {
   logLevel: 'error' | 'info' | 'debug'
   certFile?: string
   keyFile?: string
+  tlsConfig?: string
 }
 
 const CreateTunnel: React.FC = () => {
@@ -33,6 +34,7 @@ const CreateTunnel: React.FC = () => {
   const [form] = Form.useForm()
   const [selectedMode, setSelectedMode] = useState<'server' | 'client'>('server')
   const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [tlsEnvConfig, setTlsEnvConfig] = useState<string>('')
   const [config, setConfig] = useState<CreateTunnelForm>({
     mode: 'server',
     name: '',
@@ -171,57 +173,87 @@ const CreateTunnel: React.FC = () => {
           const currentMode = getFieldValue('mode') || selectedMode
           
           return (
-            <>
-              <Row gutter={[24, 0]}>
-                <Col span={24}>
-                  <Form.Item
-                    name="name"
-                    label="隧道名称"
-                    rules={[
-                      { required: true, message: '请输入隧道名称' },
-                      { pattern: /^[a-zA-Z0-9-_]+$/, message: '只能包含字母、数字、连字符和下划线' }
-                    ]}
-                  >
-                    <Input placeholder="例如: web-server-tunnel" autoComplete="off" />
-                  </Form.Item>
-                </Col>
-              </Row>
+            <Row gutter={[24, 0]}>
+              {/* 右侧主要内容 */}
+              <Col span={24}>
+                <Row gutter={[24, 0]}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="name"
+                      label="隧道名称"
+                      rules={[
+                        { required: true, message: '请输入隧道名称' },
+                        { pattern: /^[a-zA-Z0-9-_]+$/, message: '只能包含字母、数字、连字符和下划线' }
+                      ]}
+                    >
+                      <Input placeholder="例如: web-server-tunnel" autoComplete="off" />
+                    </Form.Item>
+                  </Col>
+                  
+                  <Col span={12}>
+                    <Form.Item
+                      name="logLevel"
+                      label="日志级别"
+                      rules={[{ required: true, message: '请选择日志级别' }]}
+                    >
+                      <Select placeholder="选择日志级别">
+                        <Option value="error">
+                          <Space>
+                            <span>❌</span>
+                            <span>Error - 仅错误信息</span>
+                          </Space>
+                        </Option>
+                        <Option value="info">
+                          <Space>
+                            <span>ℹ️</span>
+                            <span>Info - 常规信息</span>
+                          </Space>
+                        </Option>
+                        <Option value="debug">
+                          <Space>
+                            <span>🐛</span>
+                            <span>Debug - 详细调试信息</span>
+                          </Space>
+                        </Option>
+                      </Select>
+                    </Form.Item>
+                  </Col>
+                </Row>
 
-              <Row gutter={[24, 0]} style={{ marginTop: -8 }}>
-                <Col span={12}>
-                  <Form.Item
-                    name="tunnelAddr"
-                    label="隧道地址"
-                    rules={[{ required: true, message: '请输入隧道地址' }]}
-                  >
-                    <Input 
-                      placeholder="例如: 0.0.0.0:10101"
-                      addonBefore={<span>🌐</span>}
-                      autoComplete="off"
-                    />
-                  </Form.Item>
-                </Col>
-                
-                <Col span={12}>
-                  <Form.Item
-                    name="targetAddr"
-                    label="目标地址"
-                    rules={[{ required: true, message: '请输入目标地址' }]}
-                  >
-                    <Input 
-                      placeholder="0.0.0.0:8080" 
-                      addonBefore={<span>🌐</span>}
-                      autoComplete="off"
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
+                <Row gutter={[24, 0]} style={{ marginTop: -8 }}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="tunnelAddr"
+                      label="隧道地址"
+                      rules={[{ required: true, message: '请输入隧道地址' }]}
+                    >
+                      <Input 
+                        placeholder="例如: 0.0.0.0:10101"
+                        addonBefore={<span>🌐</span>}
+                        autoComplete="off"
+                      />
+                    </Form.Item>
+                  </Col>
+                  
+                  <Col span={12}>
+                    <Form.Item
+                      name="targetAddr"
+                      label="目标地址"
+                      rules={[{ required: true, message: '请输入目标地址' }]}
+                    >
+                      <Input 
+                        placeholder="0.0.0.0:8080" 
+                        addonBefore={<span>🌐</span>}
+                        autoComplete="off"
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
 
-              {/* 只有服务器模式才显示安全设置 */}
-              {currentMode === 'server' && (
-                <>
+                {/* 只有服务器模式才显示安全设置 */}
+                {currentMode === 'server' && (
                   <Row gutter={[24, 0]} style={{ marginTop: -8 }}>
-                    <Col span={12}>
+                    <Col span={8}>
                       <Form.Item
                         name="tlsMode"
                         label="TLS 安全级别"
@@ -268,39 +300,7 @@ const CreateTunnel: React.FC = () => {
                       </Form.Item>
                     </Col>
                     
-                    <Col span={12}>
-                      <Form.Item
-                        name="logLevel"
-                        label="日志级别"
-                        rules={[{ required: true, message: '请选择日志级别' }]}
-                      >
-                        <Select placeholder="选择日志级别">
-                          <Option value="error">
-                            <Space>
-                              <span>❌</span>
-                              <span>Error - 仅错误信息</span>
-                            </Space>
-                          </Option>
-                          <Option value="info">
-                            <Space>
-                              <span>ℹ️</span>
-                              <span>Info - 常规信息</span>
-                            </Space>
-                          </Option>
-                          <Option value="debug">
-                            <Space>
-                              <span>🐛</span>
-                              <span>Debug - 详细调试信息</span>
-                            </Space>
-                          </Option>
-                        </Select>
-                      </Form.Item>
-                    </Col>
-                  </Row>
-
-                  {/* 证书文件设置 - 始终显示，但根据TLS模式控制是否可用 */}
-                  <Row gutter={[24, 0]} style={{ marginTop: -8 }}>
-                    <Col span={12}>
+                    <Col span={8}>
                       <Form.Item
                         name="certFile"
                         label="证书文件路径"
@@ -314,7 +314,7 @@ const CreateTunnel: React.FC = () => {
                       </Form.Item>
                     </Col>
                     
-                    <Col span={12}>
+                    <Col span={8}>
                       <Form.Item
                         name="keyFile"
                         label="密钥文件路径"
@@ -328,9 +328,9 @@ const CreateTunnel: React.FC = () => {
                       </Form.Item>
                     </Col>
                   </Row>
-                </>
-              )}
-            </>
+                )}
+              </Col>
+            </Row>
           )
         }}
       </Form.Item>
@@ -547,6 +547,22 @@ const CreateTunnel: React.FC = () => {
                     )}
                     {config.keyFile && (
                       <li><strong>密钥文件：</strong>{config.keyFile}</li>
+                    )}
+                    {config.tlsConfig && (
+                      <li>
+                        <strong>TLS 环境变量配置：</strong>
+                        <pre style={{ 
+                          margin: '8px 0', 
+                          padding: '8px', 
+                          background: 'var(--code-bg)', 
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all'
+                        }}>
+                          {config.tlsConfig}
+                        </pre>
+                      </li>
                     )}
                   </>
                 )}

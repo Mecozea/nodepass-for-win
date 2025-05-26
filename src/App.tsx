@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { ConfigProvider, Modal, message } from 'antd'
+import { ConfigProvider, Modal, message, theme } from 'antd'
 import { ExclamationCircleOutlined } from '@ant-design/icons'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
@@ -10,6 +10,7 @@ import TunnelManagement from './pages/TunnelManagement'
 import CreateTunnel from './pages/CreateTunnel'
 import LogsPage from './pages/LogsPage'
 import SystemSettings from './pages/SystemSettings'
+import TunnelLog from './pages/TunnelLog'
 import { SettingsProvider, useSettings } from './context/SettingsContext'
 import { LogProvider } from './context/LogContext'
 import { TunnelProvider } from './context/TunnelContext'
@@ -57,7 +58,7 @@ const AppContent: React.FC = () => {
       })
     })
 
-    // 监听窗口主题初始化事件（新的事件）
+    // 监听窗口主题初始化事件
     const unlistenWindowTheme = listen('window-theme-initialized', (event) => {
       const { theme: windowTheme, systemFrame } = event.payload as { theme: string, systemFrame: string }
       console.log('窗口主题已初始化:', { windowTheme, systemFrame })
@@ -68,7 +69,7 @@ const AppContent: React.FC = () => {
       }
     })
 
-    // 监听初始主题设置事件（保持兼容性）
+    // 监听初始主题设置事件
     const unlistenTheme = listen('set-initial-theme', async () => {
       try {
         await invoke('set_window_theme', { theme })
@@ -97,13 +98,11 @@ const AppContent: React.FC = () => {
             <Layout>
               <Routes>
                 <Route path="/" element={<Navigate to="/tunnels" replace />} />
-                <Route 
-                  path="/tunnels" 
-                  element={<TunnelManagement />} 
-                />
+                <Route path="/tunnels" element={<TunnelManagement />} />
                 <Route path="/create-tunnel" element={<CreateTunnel />} />
                 <Route path="/logs" element={<LogsPage />} />
                 <Route path="/settings" element={<SystemSettings />} />
+                <Route path="/tunnel/:id/log" element={<TunnelLog />} />
               </Routes>
             </Layout>
           </Router>

@@ -1,45 +1,69 @@
-import React from 'react'
-import { Modal, List, Tag, Button, Select, Space, Typography, Empty } from 'antd'
-import { DeleteOutlined, FilterOutlined } from '@ant-design/icons'
-import { useLog, LogLevel, LogEntry } from '../context/LogContext'
-
-const { Text } = Typography
+import React, { useEffect, useRef } from 'react'
+import { Modal, Button } from 'antd'
+import { DeleteOutlined } from '@ant-design/icons'
+import AnsiToHtml from 'ansi-to-html'
+import { useLog } from '../context/LogContext'
 
 interface LogViewerProps {
   open: boolean
   onClose: () => void
+  logs: string[]
+  containerRef?: React.RefObject<HTMLDivElement>
 }
 
-const LogViewer: React.FC<LogViewerProps> = ({ open, onClose }) => {
-  const { filteredLogs, clearLogs, filterLevel, setFilterLevel } = useLog()
-
-  const getLevelColor = (level: LogLevel) => {
-    switch (level) {
-      case 'error': return 'red'
-      case 'warn': return 'orange'
-      case 'info': return 'blue'
-      case 'debug': return 'gray'
-      default: return 'default'
+const LogViewer: React.FC<LogViewerProps> = ({ open, onClose, logs, containerRef }) => {
+  const { clearLogs } = useLog()
+  const logContainerRef = useRef<HTMLDivElement>(null)
+  const ansiConverter = useRef(new AnsiToHtml({
+    fg: '#d4d4d4',
+    bg: '#1e1e1e',
+    newline: true,
+    escapeXML: true,
+    colors: {
+      0: '#000000',
+      1: '#ff0000',
+      2: '#00ff00',
+      3: '#ffff00',
+      4: '#0000ff',
+      5: '#ff00ff',
+      6: '#00ffff',
+      7: '#ffffff',
+      8: '#808080',
+      9: '#ff8080',
+      10: '#80ff80',
+      11: '#ffff80',
+      12: '#8080ff',
+      13: '#ff80ff',
+      14: '#80ffff',
+      15: '#ffffff'
     }
-  }
+  }))
 
-  const formatTime = (timestamp: Date) => {
-    const timeStr = timestamp.toLocaleTimeString('zh-CN', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    })
-    const ms = timestamp.getMilliseconds().toString().padStart(3, '0')
-    return `${timeStr}.${ms}`
-  }
+  // 自动滚动到底部
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
+    }
+  }, [logs])
 
   return (
     <Modal
       title="应用日志"
       open={open}
       onCancel={onClose}
-      footer={null}
+      footer={[
+        <Button 
+          key="clear" 
+          icon={<DeleteOutlined />} 
+          onClick={clearLogs}
+          danger
+        >
+          清空日志
+        </Button>,
+        <Button key="close" onClick={onClose}>
+          关闭
+        </Button>
+      ]}
       width={800}
       style={{ top: 20 }}
       bodyStyle={{ 
@@ -48,108 +72,38 @@ const LogViewer: React.FC<LogViewerProps> = ({ open, onClose }) => {
         padding: '16px'
       }}
     >
-      {/* 工具栏 */}
-      <div style={{ 
-        marginBottom: 16, 
-        display: 'flex', 
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <Space>
-          <FilterOutlined />
-          <Text>级别筛选:</Text>
-          <Select
-            value={filterLevel}
-            onChange={setFilterLevel}
-            style={{ width: 120 }}
-            size="small"
+      <div 
+        ref={logContainerRef}
+        style={{
+          height: '500px',
+          backgroundColor: '#1e1e1e',
+          color: '#d4d4d4',
+          fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+          fontSize: '12px',
+          padding: '16px',
+          borderRadius: '4px',
+          overflowY: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all'
+        }}
+      >
+        {logs.map((log, index) => (
+          <div 
+            key={index}
+            style={{ 
+              padding: '2px 0',
+              lineHeight: '1.4'
+            }}
           >
-            <Select.Option value="all">全部</Select.Option>
-            <Select.Option value="error">错误</Select.Option>
-            <Select.Option value="warn">警告</Select.Option>
-            <Select.Option value="info">信息</Select.Option>
-            <Select.Option value="debug">调试</Select.Option>
-          </Select>
-          <Text type="secondary">
-            共 {filteredLogs.length} 条日志
-          </Text>
-        </Space>
-        
-        <Button 
-          icon={<DeleteOutlined />} 
-          onClick={clearLogs}
-          size="small"
-          danger
-        >
-          清空日志
-        </Button>
+            <span style={{ color: '#888', marginRight: '8px' }}>
+              [{String(index + 1).padStart(3, '0')}]
+            </span>
+            <span dangerouslySetInnerHTML={{ 
+              __html: ansiConverter.current.toHtml(log)
+            }} />
+          </div>
+        ))}
       </div>
-
-      {/* 日志列表 */}
-      {filteredLogs.length === 0 ? (
-        <Empty 
-          description="暂无日志"
-          style={{ margin: '40px 0' }}
-        />
-      ) : (
-        <List
-          dataSource={filteredLogs}
-          renderItem={(log: LogEntry) => (
-            <List.Item style={{ padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
-              <div style={{ width: '100%' }}>
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  marginBottom: 4,
-                  gap: 8
-                }}>
-                  <Text 
-                    type="secondary" 
-                    style={{ 
-                      fontSize: '12px',
-                      fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
-                      minWidth: '80px'
-                    }}
-                  >
-                    {formatTime(log.timestamp)}
-                  </Text>
-                  <Tag 
-                    color={getLevelColor(log.level)}
-                    style={{ 
-                      fontSize: '11px',
-                      minWidth: '50px',
-                      textAlign: 'center',
-                      margin: 0
-                    }}
-                  >
-                    {log.level.toUpperCase()}
-                  </Tag>
-                  {log.source && (
-                    <Tag 
-                      color="default"
-                      style={{ 
-                        fontSize: '11px',
-                        margin: 0
-                      }}
-                    >
-                      {log.source}
-                    </Tag>
-                  )}
-                </div>
-                <div style={{ 
-                  fontSize: '13px',
-                  lineHeight: '1.4',
-                  wordBreak: 'break-word',
-                  fontFamily: log.level === 'error' ? 'Monaco, Menlo, "Ubuntu Mono", monospace' : 'inherit'
-                }}>
-                  {log.message}
-                </div>
-              </div>
-            </List.Item>
-          )}
-          style={{ maxHeight: '400px', overflowY: 'auto' }}
-        />
-      )}
     </Modal>
   )
 }

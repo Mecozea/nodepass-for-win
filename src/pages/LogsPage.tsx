@@ -77,8 +77,8 @@ const LogsPage: React.FC<LogsPageProps> = () => {
     ) : filteredLogs
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <Card style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Card style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         {/* 工具栏 */}
         <div style={{ 
           marginBottom: 16, 
@@ -140,7 +140,7 @@ const LogsPage: React.FC<LogsPageProps> = () => {
         </div>
 
         {/* 日志列表容器 */}
-        <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0 }}>
           {displayLogs.length === 0 ? (
             <Empty 
               description={searchText ? "未找到匹配的日志" : "暂无日志"}
@@ -167,7 +167,7 @@ const LogsPage: React.FC<LogsPageProps> = () => {
                           margin: 0
                         }}
                       >
-                        {log.level.toUpperCase()}
+                        {log.level ? log.level.toUpperCase() : 'UNKNOWN'}
                       </Tag>
                       <Text 
                         type="secondary" 

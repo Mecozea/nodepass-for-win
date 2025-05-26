@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Card, Button, Tag, Space, Modal, message, Switch, Radio } from 'antd'
+import { Card, Button, Tag, Space, Modal, message, Switch, Radio, Input } from 'antd'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { 
   faDownload, 
@@ -11,7 +11,8 @@ import {
   faMoon, 
   faDesktop, 
   faChevronRight,
-  faFolder
+  faFolder,
+  faGear
 } from '@fortawesome/free-solid-svg-icons'
 import { faGithub } from '@fortawesome/free-brands-svg-icons'
 import { invoke } from '@tauri-apps/api/core'
@@ -61,11 +62,11 @@ const SettingItem: React.FC<{
     display: 'flex', 
     justifyContent: 'space-between', 
     alignItems: 'center',
-    padding: '12px 0',
+    padding: '10px 10px',
     borderBottom: '1px solid #f0f0f0'
   }}>
     <div style={{ flex: 1 }}>
-      <div style={{ fontWeight: 500, marginBottom: description ? 4 : 0 }}>
+      <div style={{ fontWeight: 500, marginBottom: description ? 2 : 0 }}>
         {label}
       </div>
       {description && (
@@ -74,7 +75,7 @@ const SettingItem: React.FC<{
         </div>
       )}
     </div>
-    <div style={{ marginLeft: 16 }}>
+    <div style={{ marginLeft: 12 }}>
       {children}
     </div>
   </div>
@@ -92,7 +93,9 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
   const [checkingStatus, setCheckingStatus] = useState(false)
   const [appVersion, setAppVersion] = useState<string>('0.0.1')
   const [showProxyModal, setShowProxyModal] = useState(false)
+  const [showEnvModal, setShowEnvModal] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [envConfig, setEnvConfig] = useState<'none' | 'custom' | 'high-throughput' | 'low-latency' | 'resource-limited'>('none')
   
   // 从Context获取设置和日志
   const { settings, updateSettings, theme, setTheme, isTopNav, setIsTopNav } = useSettings()
@@ -229,8 +232,6 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
     }
   }
 
-
-
   const handleThemeChange = async (value: 'light' | 'dark' | 'auto') => {
     try {
       await setTheme(value)
@@ -279,8 +280,6 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
     
     return anyWindowsAssets.length > 0 ? anyWindowsAssets[0] : null;
   }
-
-
 
   // 下载适合系统的包
   const downloadSystemAppropriate = () => {
@@ -413,93 +412,108 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
               </div>
             }
             style={{ marginBottom: 24 }}
+            bodyStyle={{ padding: '0 8px' }}
           >
-            <div style={{ padding: '0 8px' }}>
-              <SettingItem 
-                label={
-                  <Space>
-                    <span>核心状态</span>
-                    {nodePassStatus?.installed && (
-                      <Button 
-                        icon={<FontAwesomeIcon icon={faFolder} />} 
-                        onClick={openCoreDirectory}
-                        size="small"
-                        type="text"
-                        title="打开核心文件目录"
-                        style={{ color: '#666' }}
-                      />
-                    )}
-                  </Space>
-                }
-                description="NodePass 核心执行文件状态"
-              >
+            <SettingItem 
+              label={
                 <Space>
-                  {nodePassStatus ? (
-                    nodePassStatus.installed ? (
-                      // 已安装：显示版本号按钮，点击检查更新
-                      <Button 
-                        type="text" 
-                        size="small"
-                        onClick={checkForUpdates}
-                        style={{ 
-                          color: '#52c41a',
-                          backgroundColor: '#f6ffed',
-                          border: '1px solid #b7eb8f',
-                          borderRadius: '4px',
-                          fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
-                          fontSize: '12px',
-                          fontWeight: 500,
-                          padding: '2px 8px',
-                          height: 'auto',
-                          lineHeight: '1.2'
-                        }}
-                        title="点击检查更新"
-                      >
-                        {nodePassStatus.version || 'v?.?.?'}
-                      </Button>
-                    ) : (
-                      // 未安装：显示未安装按钮，点击打开GitHub发布页面
-                      <Button 
-                        type="text" 
-                        size="small"
-                        onClick={handleCoreStatusClick}
-                        style={{ color: '#ff4d4f' }}
-                      >
-                        未安装
-                      </Button>
-                    )
-                  ) : (
-                    <Tag>检测中...</Tag>
+                  <span>核心状态</span>
+                  {nodePassStatus?.installed && (
+                    <Button 
+                      icon={<FontAwesomeIcon icon={faFolder} />} 
+                      onClick={openCoreDirectory}
+                      size="small"
+                      type="text"
+                      title="打开核心文件目录"
+                      style={{ color: '#666' }}
+                    />
                   )}
                 </Space>
-              </SettingItem>
+              }
+              description="NodePass 核心执行文件状态"
+            >
+              <Space>
+                {nodePassStatus ? (
+                  nodePassStatus.installed ? (
+                    // 已安装：显示版本号按钮，点击检查更新
+                    <Button 
+                      type="text" 
+                      size="small"
+                      onClick={checkForUpdates}
+                      style={{ 
+                        color: '#52c41a',
+                        backgroundColor: '#f6ffed',
+                        border: '1px solid #b7eb8f',
+                        borderRadius: '4px',
+                        fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+                        fontSize: '12px',
+                        fontWeight: 500,
+                        padding: '2px 8px',
+                        height: 'auto',
+                        lineHeight: '1.2'
+                      }}
+                      title="点击检查更新"
+                    >
+                      {nodePassStatus.version || 'v?.?.?'}
+                    </Button>
+                  ) : (
+                    // 未安装：显示未安装按钮，点击打开GitHub发布页面
+                    <Button 
+                      type="text" 
+                      size="small"
+                      onClick={handleCoreStatusClick}
+                      style={{ color: '#ff4d4f' }}
+                    >
+                      未安装
+                    </Button>
+                  )
+                ) : (
+                  <Tag>检测中...</Tag>
+                )}
+              </Space>
+            </SettingItem>
 
-              <SettingItem 
-                label="应用版本"
-                description="NodePass GUI 当前版本号"
+            <SettingItem 
+              label="应用版本"
+              description="NodePass GUI 当前版本号"
+            >
+              <Button 
+                type="text" 
+                size="small"
+                style={{ 
+                  color: '#1890ff',
+                  backgroundColor: '#e6f7ff',
+                  border: '1px solid #91d5ff',
+                  borderRadius: '4px',
+                  fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  padding: '2px 8px',
+                  height: 'auto',
+                  lineHeight: '1.2'
+                }}
               >
-                <Button 
-                  type="text" 
-                  size="small"
-                  style={{ 
-                    color: '#1890ff',
-                    backgroundColor: '#e6f7ff',
-                    border: '1px solid #91d5ff',
-                    borderRadius: '4px',
-                    fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
-                    fontSize: '12px',
-                    fontWeight: 500,
-                    padding: '2px 8px',
-                    height: 'auto',
-                    lineHeight: '1.2'
-                  }}
-                >
-                  v{appVersion}
-                </Button>
-              </SettingItem>
+                v{appVersion}
+              </Button>
+            </SettingItem>
 
-
-            </div>
+            <SettingItem 
+              label="环境变量策略"
+              description="配置 NodePass 核心运行时的环境变量"
+            >
+              <Button 
+                type="text" 
+                size="small"
+                onClick={() => setShowEnvModal(true)}
+              >
+                {envConfig === 'none' && '无配置'}
+                {envConfig === 'custom' && '自定义'}
+                {envConfig === 'high-throughput' && '高吞吐量'}
+                {envConfig === 'low-latency' && '低延迟'}
+                {envConfig === 'resource-limited' && '资源受限'}
+                <FontAwesomeIcon icon={faChevronRight} />
+              </Button>
+            </SettingItem>
           </Card>
 
           {/* 主题设置 */}
@@ -511,51 +525,50 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
               </Space>
             }
             style={{ marginBottom: 24 }}
+            bodyStyle={{ padding: '0 8px' }}
           >
-            <div style={{ padding: '0 8px' }}>
-              <SettingItem 
-                label="主题模式"
-                description={
-                  theme === 'light' ? '使用浅色主题' :
-                  theme === 'dark' ? '使用深色主题' : 
-                  '根据系统设置自动切换主题'
-                }
+            <SettingItem 
+              label="主题模式"
+              description={
+                theme === 'light' ? '使用浅色主题' :
+                theme === 'dark' ? '使用深色主题' : 
+                '根据系统设置自动切换主题'
+              }
+            >
+              <Radio.Group 
+                value={theme} 
+                onChange={(e) => handleThemeChange(e.target.value)}
+                size="small"
               >
-                <Radio.Group 
-                  value={theme} 
-                  onChange={(e) => handleThemeChange(e.target.value)}
-                  size="small"
-                >
-                  <Radio.Button value="light">
-                    <FontAwesomeIcon icon={faSun} />
-                  </Radio.Button>
-                  <Radio.Button value="dark">
-                    <FontAwesomeIcon icon={faMoon} />
-                  </Radio.Button>
-                  <Radio.Button value="auto">
-                    <FontAwesomeIcon icon={faDesktop} />
-                  </Radio.Button>
-                </Radio.Group>
-              </SettingItem>
+                <Radio.Button value="light">
+                  <FontAwesomeIcon icon={faSun} />
+                </Radio.Button>
+                <Radio.Button value="dark">
+                  <FontAwesomeIcon icon={faMoon} />
+                </Radio.Button>
+                <Radio.Button value="auto">
+                  <FontAwesomeIcon icon={faDesktop} />
+                </Radio.Button>
+              </Radio.Group>
+            </SettingItem>
 
-              <SettingItem 
-                label="导航栏模式"
-                description="调整应用导航栏显示选项"
+            <SettingItem 
+              label="导航栏模式"
+              description="调整应用导航栏显示选项"
+            >
+              <Radio.Group 
+                value={isTopNav ? 'top' : 'side'} 
+                onChange={(e) => handleNavModeChange(e.target.value === 'top')}
+                size="small"
               >
-                <Radio.Group 
-                  value={isTopNav ? 'top' : 'side'} 
-                  onChange={(e) => handleNavModeChange(e.target.value === 'top')}
-                  size="small"
-                >
-                  <Radio.Button value="side">
-                    侧边导航
-                  </Radio.Button>
-                  <Radio.Button value="top">
-                    顶部导航
-                  </Radio.Button>
-                </Radio.Group>
-              </SettingItem>
-            </div>
+                <Radio.Button value="side">
+                  侧边导航
+                </Radio.Button>
+                <Radio.Button value="top">
+                  顶部导航
+                </Radio.Button>
+              </Radio.Group>
+            </SettingItem>
           </Card>
         </div>
 
@@ -570,72 +583,66 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
               </Space>
             }
             style={{ marginBottom: 24 }}
+            bodyStyle={{ padding: '0 8px' }}
           >
-            <div style={{ padding: '0 8px' }}>
-              <SettingItem 
-                label="开机自启"
-                description="系统启动时自动运行 NodePass GUI"
+            <SettingItem 
+              label="开机自启"
+              description="系统启动时自动运行 NodePass GUI"
+            >
+              <Switch 
+                size="small" 
+                onChange={() => message.info('此功能正在开发中')}
+              />
+            </SettingItem>
+
+            <SettingItem 
+              label="最小化到托盘"
+              description="关闭窗口时最小化到系统托盘"
+            >
+              <Switch 
+                size="small" 
+                onChange={() => message.info('此功能正在开发中')}
+              />
+            </SettingItem>
+
+            <SettingItem 
+              label="日志级别"
+              description="设置应用日志记录详细程度"
+            >
+              <Button 
+                type="text" 
+                size="small"
+                onClick={() => message.info('此功能正在开发中')}
               >
-                <Switch 
-                  size="small" 
-                  onChange={() => message.info('此功能正在开发中')}
-                />
-              </SettingItem>
+                配置 <FontAwesomeIcon icon={faChevronRight} />
+              </Button>
+            </SettingItem>
 
-              <SettingItem 
-                label="最小化到托盘"
-                description="关闭窗口时最小化到系统托盘"
+            <SettingItem 
+              label="数据导出"
+              description="导出隧道配置和应用设置"
+            >
+              <Button 
+                type="text" 
+                size="small"
+                onClick={() => message.info('此功能正在开发中')}
               >
-                <Switch 
-                  size="small" 
-                  onChange={() => message.info('此功能正在开发中')}
-                />
-              </SettingItem>
+                导出 <FontAwesomeIcon icon={faChevronRight} />
+              </Button>
+            </SettingItem>
 
-              <SettingItem 
-                label="日志级别"
-                description="设置应用日志记录详细程度"
+            <SettingItem 
+              label="代理设置"
+              description="配置网络代理，用于访问GitHub等外部服务"
+            >
+              <Button 
+                type="text" 
+                size="small"
+                onClick={() => setShowProxyModal(true)}
               >
-                <Button 
-                  type="text" 
-                  size="small"
-                  onClick={() => message.info('此功能正在开发中')}
-                >
-                  配置 <FontAwesomeIcon icon={faChevronRight} />
-                </Button>
-              </SettingItem>
-
-              <SettingItem 
-                label="数据导出"
-                description="导出隧道配置和应用设置"
-              >
-                <Button 
-                  type="text" 
-                  size="small"
-                  onClick={() => message.info('此功能正在开发中')}
-                >
-                  导出 <FontAwesomeIcon icon={faChevronRight} />
-                </Button>
-              </SettingItem>
-
-              <SettingItem 
-                label="代理设置"
-                description="配置网络代理，用于访问GitHub等外部服务"
-              >
-                <Button 
-                  type="text" 
-                  size="small"
-                  onClick={() => setShowProxyModal(true)}
-                  style={{
-                    color: settings.proxy.enabled ? '#52c41a' : '#ff4d4f'
-                  }}
-                >
-                  {settings.proxy.enabled ? '已配置' : '未配置'} <FontAwesomeIcon icon={faChevronRight} />
-                </Button>
-              </SettingItem>
-
-
-            </div>
+                {settings.proxy.enabled ? '已配置' : '未配置'} <FontAwesomeIcon icon={faChevronRight} />
+              </Button>
+            </SettingItem>
           </Card>
         </div>
       </div>
@@ -775,10 +782,179 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
                 </div>
               </div>
             </Card>
-
-
           </div>
         )}
+      </Modal>
+
+      {/* 环境变量配置弹窗 */}
+      <Modal
+        title={
+          <Space>
+            <span>环境变量策略配置</span>
+            <span style={{ color: '#ff4d4f', fontSize: '12px' }}>非必要请不要设置</span>
+          </Space>
+        }
+        open={showEnvModal}
+        onCancel={() => setShowEnvModal(false)}
+        footer={null}
+        width={800}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Radio.Group 
+            value={envConfig}
+            onChange={(e) => setEnvConfig(e.target.value)}
+            style={{ width: '100%' }}
+          >
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Radio value="none">
+                <div>
+                  <div style={{ fontWeight: 500 }}>无配置</div>
+                  <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                    使用系统默认配置，不设置任何环境变量
+                  </div>
+                </div>
+              </Radio>
+              <Radio value="custom">
+                <div>
+                  <div style={{ fontWeight: 500 }}>自定义配置</div>
+                  <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                    手动配置所有环境变量
+                  </div>
+                </div>
+              </Radio>
+              <Radio value="high-throughput">
+                <div>
+                  <div style={{ fontWeight: 500 }}>高吞吐量配置</div>
+                  <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                    优化网络吞吐量，适合大文件传输场景
+                  </div>
+                </div>
+              </Radio>
+              <Radio value="low-latency">
+                <div>
+                  <div style={{ fontWeight: 500 }}>低延迟配置</div>
+                  <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                    优化网络延迟，适合实时通信场景
+                  </div>
+                </div>
+              </Radio>
+              <Radio value="resource-limited">
+                <div>
+                  <div style={{ fontWeight: 500 }}>资源受限配置</div>
+                  <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                    降低资源占用，适合低配置设备
+                  </div>
+                </div>
+              </Radio>
+            </Space>
+          </Radio.Group>
+        </div>
+
+        {envConfig === 'custom' ? (
+          <div>
+            <div style={{ marginBottom: 16 }}>
+              <h4>自定义环境变量</h4>
+              <p style={{ fontSize: '12px', color: '#666', marginBottom: 8 }}>
+                请根据需求配置以下环境变量，每个变量一行，格式为 KEY=VALUE
+              </p>
+              <Input.TextArea 
+                rows={10}
+                placeholder={`NODEPASS_TLS_CIPHERS=TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384
+NODEPASS_TLS_MIN_VERSION=TLSv1.2
+NODEPASS_TLS_MAX_VERSION=TLSv1.3
+NODEPASS_TLS_CURVES=X25519:P-256:P-384
+NODEPASS_TLS_SESSION_TICKETS=true
+NODEPASS_TLS_SESSION_CACHE_SIZE=1000
+NODEPASS_TLS_SESSION_CACHE_TIMEOUT=3600
+NODEPASS_TLS_ALPN_PROTOCOLS=h2,http/1.1
+NODEPASS_TLS_VERIFY_PEER=true
+NODEPASS_TLS_VERIFY_PEER_NAME=true
+NODEPASS_TLS_VERIFY_PEER_CERT=true
+NODEPASS_TLS_VERIFY_PEER_CERT_CHAIN=true
+NODEPASS_TLS_VERIFY_PEER_CERT_ISSUER=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SUBJECT=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SERIAL=true
+NODEPASS_TLS_VERIFY_PEER_CERT_FINGERPRINT=true
+NODEPASS_TLS_VERIFY_PEER_CERT_PUBKEY=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_ALG=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_PARAMS=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_VALID=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_INVALID=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_UNKNOWN=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_UNSUPPORTED=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_EXPIRED=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_REVOKED=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CA=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_SELF=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_ROOT=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_INTERMEDIATE=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_LEAF=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_VALID=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_INVALID=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_UNKNOWN=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_UNSUPPORTED=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_EXPIRED=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_REVOKED=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_CA=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_SELF=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_ROOT=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_INTERMEDIATE=true
+NODEPASS_TLS_VERIFY_PEER_CERT_SIG_CHAIN_LEAF=true`}
+              />
+            </div>
+          </div>
+        ) : envConfig !== 'none' && (
+          <div>
+            <h4>预设配置详情</h4>
+            <div style={{ 
+              background: '#f5f5f5', 
+              padding: 16, 
+              borderRadius: 4,
+              fontFamily: 'monospace',
+              fontSize: '12px',
+              whiteSpace: 'pre-wrap'
+            }}>
+              {envConfig === 'high-throughput' && `NODEPASS_TLS_CIPHERS=TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384
+NODEPASS_TLS_MIN_VERSION=TLSv1.2
+NODEPASS_TLS_MAX_VERSION=TLSv1.3
+NODEPASS_TLS_CURVES=X25519:P-256:P-384
+NODEPASS_TLS_SESSION_TICKETS=true
+NODEPASS_TLS_SESSION_CACHE_SIZE=1000
+NODEPASS_TLS_SESSION_CACHE_TIMEOUT=3600
+NODEPASS_TLS_ALPN_PROTOCOLS=h2,http/1.1`}
+              {envConfig === 'low-latency' && `NODEPASS_TLS_CIPHERS=TLS_AES_128_GCM_SHA256
+NODEPASS_TLS_MIN_VERSION=TLSv1.2
+NODEPASS_TLS_MAX_VERSION=TLSv1.3
+NODEPASS_TLS_CURVES=X25519
+NODEPASS_TLS_SESSION_TICKETS=true
+NODEPASS_TLS_SESSION_CACHE_SIZE=100
+NODEPASS_TLS_SESSION_CACHE_TIMEOUT=1800
+NODEPASS_TLS_ALPN_PROTOCOLS=http/1.1`}
+              {envConfig === 'resource-limited' && `NODEPASS_TLS_CIPHERS=TLS_AES_128_GCM_SHA256
+NODEPASS_TLS_MIN_VERSION=TLSv1.2
+NODEPASS_TLS_MAX_VERSION=TLSv1.2
+NODEPASS_TLS_CURVES=P-256
+NODEPASS_TLS_SESSION_TICKETS=false
+NODEPASS_TLS_SESSION_CACHE_SIZE=50
+NODEPASS_TLS_SESSION_CACHE_TIMEOUT=900
+NODEPASS_TLS_ALPN_PROTOCOLS=http/1.1`}
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 16, textAlign: 'right' }}>
+          <Space>
+            <Button onClick={() => setShowEnvModal(false)}>取消</Button>
+            <Button type="primary" onClick={() => {
+              message.success('环境变量策略已更新');
+              setShowEnvModal(false);
+            }}>
+              确定
+            </Button>
+          </Space>
+        </div>
       </Modal>
 
       {/* 代理设置弹窗 */}

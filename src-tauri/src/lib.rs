@@ -12,6 +12,10 @@ use tokio_stream::StreamExt;
 use reqwest;
 use flate2::read::GzDecoder;
 use tar::Archive;
+use std::process::{Command, Child};
+use tokio::sync::mpsc;
+use tokio::time::{sleep, Duration};
+use lazy_static;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct NodePassConfig {
@@ -99,6 +103,128 @@ impl AppState {
     }
 }
 
+// 添加新的结构体用于进程监控
+#[derive(Clone)]
+struct ProcessMonitor {
+    app_handle: AppHandle,
+    id: String,
+    pid: u32,
+}
+
+impl ProcessMonitor {
+    async fn start_monitoring(self) {
+        let (tx, mut rx) = mpsc::channel(100);
+        
+        // 启动日志监控
+        let log_tx = tx.clone();
+        let id = self.id.clone();
+        tokio::spawn(async move {
+            let process = {
+                let mut processes = PROCESSES.lock().unwrap();
+                processes.get_mut(&id).and_then(|p| p.stdout.take())
+            };
+            
+            if let Some(stdout) = process {
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if log_tx.send(LogMessage {
+                        id: id.clone(),
+                        message: line,
+                    }).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        // 启动进程状态监控
+        let status_tx = tx.clone();
+        let id = self.id.clone();
+        let app_handle = self.app_handle.clone();
+        tokio::spawn(async move {
+            loop {
+                let is_running = unsafe {
+                    let pid = self.pid;
+                    match windows::Win32::System::Threading::OpenProcess(
+                        windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION,
+                        false,
+                        pid
+                    ) {
+                        Ok(handle) => {
+                            let mut exit_code = 0;
+                            let result = windows::Win32::System::Threading::GetExitCodeProcess(
+                                handle,
+                                &mut exit_code
+                            );
+                            result.as_bool() && exit_code == 259 // STILL_ACTIVE
+                        }
+                        Err(_) => false
+                    }
+                };
+
+                if !is_running {
+                    if status_tx.send(LogMessage {
+                        id: id.clone(),
+                        message: "进程已意外退出".to_string(),
+                    }).await.is_err() {
+                        break;
+                    }
+                    
+                    // 更新状态
+                    let mut tunnels = TUNNELS.lock().unwrap();
+                    if let Some(tunnel) = tunnels.get_mut(&id) {
+                        tunnel.status = "stopped".to_string();
+                        tunnel.pid = None;
+                    }
+                    
+                    // 发送状态更新事件
+                    let _ = app_handle.emit("tunnel-status-changed", 
+                        serde_json::json!({
+                            "id": id,
+                            "status": "stopped",
+                            "pid": null
+                        })
+                    );
+                    break;
+                }
+                
+                sleep(Duration::from_secs(1)).await;
+            }
+        });
+
+        // 处理日志和状态更新
+        let app_handle = self.app_handle;
+        while let Some(msg) = rx.recv().await {
+            // 发送日志到前端
+            let _ = app_handle.emit("tunnel-log", 
+                serde_json::json!({
+                    "id": msg.id,
+                    "message": msg.message
+                })
+            );
+        }
+    }
+}
+
+#[derive(Clone)]
+struct LogMessage {
+    id: String,
+    message: String,
+}
+
+// 添加全局变量
+lazy_static::lazy_static! {
+    static ref PROCESSES: Arc<Mutex<HashMap<String, tokio::process::Child>>> = Arc::new(Mutex::new(HashMap::new()));
+    static ref TUNNELS: Arc<Mutex<HashMap<String, TunnelInfo>>> = Arc::new(Mutex::new(HashMap::new()));
+}
+
+#[derive(Clone)]
+struct TunnelInfo {
+    status: String,
+    pid: Option<u32>,
+}
+
 #[tauri::command]
 async fn start_nodepass(
     app_handle: AppHandle,
@@ -151,7 +277,8 @@ async fn start_nodepass(
                     }
                 }
                 
-                let _ = app_handle_clone.emit("nodepass-log", serde_json::json!({
+                // 发送日志到前端
+                let _ = app_handle_clone.emit("tunnel-log", serde_json::json!({
                     "tunnel_id": tunnel_id_clone,
                     "message": log_message
                 }));
@@ -179,7 +306,8 @@ async fn start_nodepass(
                     }
                 }
                 
-                let _ = app_handle_clone.emit("nodepass-log", serde_json::json!({
+                // 发送日志到前端
+                let _ = app_handle_clone.emit("tunnel-log", serde_json::json!({
                     "tunnel_id": tunnel_id_clone,
                     "message": log_message
                 }));
@@ -202,16 +330,18 @@ async fn start_nodepass(
         
         match status {
             Ok(exit_status) => {
-                let _ = app_handle_clone.emit("nodepass-process-exit", serde_json::json!({
+                let _ = app_handle_clone.emit("tunnel-status-changed", serde_json::json!({
                     "tunnel_id": tunnel_id_clone,
-                    "process_id": child_id_clone,
+                    "status": "stopped",
+                    "pid": null,
                     "exit_code": exit_status.code().unwrap_or(-1)
                 }));
             }
             Err(e) => {
-                let _ = app_handle_clone.emit("nodepass-process-error", serde_json::json!({
+                let _ = app_handle_clone.emit("tunnel-status-changed", serde_json::json!({
                     "tunnel_id": tunnel_id_clone,
-                    "process_id": child_id_clone,
+                    "status": "error",
+                    "pid": null,
                     "error": e.to_string()
                 }));
             }
@@ -228,6 +358,22 @@ async fn start_nodepass(
     if let Ok(mut processes) = state.processes.lock() {
         processes.insert(child_id, process_info);
     }
+
+    // 更新隧道状态
+    {
+        let mut tunnels = TUNNELS.lock().unwrap();
+        tunnels.insert(tunnel_id.clone(), TunnelInfo {
+            status: "running".to_string(),
+            pid: Some(child_id),
+        });
+    }
+
+    // 发送状态更新事件
+    let _ = app_handle.emit("tunnel-status-changed", serde_json::json!({
+        "tunnel_id": tunnel_id,
+        "status": "running",
+        "pid": child_id
+    }));
 
     // 更新托盘tooltip
     let _ = update_tray_tooltip(app_handle.clone(), state.clone()).await;
@@ -804,8 +950,6 @@ async fn open_directory(path: String) -> Result<(), String> {
     Ok(())
 }
 
-
-
 #[tauri::command]
 async fn show_window(app_handle: AppHandle) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
@@ -1134,7 +1278,7 @@ async fn extract_nodepass_archive(
     
     match &result {
         Ok(exe_path) => {
-            println!("解压完成，NodePass 可执行文件位于: {}", exe_path);
+            println!("解压成功: {}", exe_path);
         }
         Err(e) => {
             println!("解压失败: {}", e);

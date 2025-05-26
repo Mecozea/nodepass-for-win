@@ -15,6 +15,7 @@ import { listen } from '@tauri-apps/api/event'
 import { useLog } from '../context/LogContext'
 import { useSettings } from '../context/SettingsContext'
 import { useTunnel } from '../context/TunnelContext'
+import LogViewer from '../components/LogViewer'
 
 const { Text } = Typography
 
@@ -275,6 +276,27 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
       unlistenError.then(fn => fn())
     }
   }, [selectedTunnel, logModalVisible])
+
+  // 监听隧道状态变化
+  useEffect(() => {
+    let unlisten: () => void;
+
+    // 监听隧道状态变化
+    listen('tunnel-status-changed', (event) => {
+      const { tunnel_id, status, process_id } = event.payload as any;
+      setTunnels(prev => prev.map(t => 
+        t.id === tunnel_id 
+          ? { ...t, status, processId: process_id }
+          : t
+      ));
+    }).then(fn => {
+      unlisten = fn;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   // 加载隧道列表
   const loadTunnels = async () => {
@@ -542,7 +564,7 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
               size="small"
               type="default"
               icon={<FontAwesomeIcon icon={faEye} />}
-              onClick={() => handleViewLogs(record)}
+              onClick={() => navigate(`/tunnel/${record.id}/log`)}
               style={{ color: '#1890ff', borderColor: '#1890ff' }}
             />
           </Tooltip>
@@ -787,7 +809,7 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
                       size="small"
                       type="default"
                       icon={<FontAwesomeIcon icon={faEye} />}
-                      onClick={() => handleViewLogs(tunnel)}
+                      onClick={() => navigate(`/tunnel/${tunnel.id}/log`)}
                       style={{ color: '#1890ff', borderColor: '#1890ff' }}
                     />
                   </Tooltip>
