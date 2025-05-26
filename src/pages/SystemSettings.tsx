@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Card, Button, Tag, Space, Modal, message, Alert, Switch, Radio, Divider } from 'antd'
+import { Card, Button, Tag, Space, Modal, message, Switch, Radio } from 'antd'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { 
-  faCheckCircle, 
-  faExclamationTriangle, 
   faDownload, 
   faSync, 
   faCog, 
@@ -102,7 +100,6 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
 
   // 瀑布流布局相关
   const containerRef = useRef<HTMLDivElement>(null)
-  const [columnHeights, setColumnHeights] = useState([0, 0])
 
   useEffect(() => {
     // 监听下载进度
@@ -232,13 +229,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
     }
   }
 
-  const getStatusTag = (status: NodePassStatus) => {
-    if (status.installed) {
-      return <Tag color="success" icon={<FontAwesomeIcon icon={faCheckCircle} />}>已安装</Tag>
-    } else {
-      return <Tag color="error" icon={<FontAwesomeIcon icon={faExclamationTriangle} />}>未安装</Tag>
-    }
-  }
+
 
   const handleThemeChange = async (value: 'light' | 'dark' | 'auto') => {
     try {

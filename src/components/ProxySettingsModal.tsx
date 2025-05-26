@@ -19,7 +19,7 @@ const ProxySettingsModal: React.FC<ProxySettingsModalProps> = ({
 }) => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
-  const [showPassword, setShowPassword] = useState(false)
+
 
   useEffect(() => {
     if (open) {

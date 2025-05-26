@@ -1,13 +1,8 @@
 import React from 'react'
 import { Layout, Menu, Typography, Button, Space } from 'antd'
 import type { MenuProps } from 'antd'
-import {
-  DatabaseOutlined,
-  SettingOutlined,
-  FileTextOutlined,
-} from '@ant-design/icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faNetworkWired, faCog, faServer, faFileAlt, faBook, faPaperPlane } from '@fortawesome/free-solid-svg-icons'
+import { faNetworkWired, faCog, faServer, faFileAlt, faBook } from '@fortawesome/free-solid-svg-icons'
 import { faGithub, faTelegram } from '@fortawesome/free-brands-svg-icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useSettings } from '../context/SettingsContext'

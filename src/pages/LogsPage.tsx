@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Card, List, Tag, Button, Select, Space, Typography, Empty, Input, message } from 'antd'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faFilter, faSearch, faDownload, faTrash } from '@fortawesome/free-solid-svg-icons'
 import { useLog, LogLevel, LogEntry } from '../context/LogContext'
 
-const { Text, Title } = Typography
+const { Text } = Typography
 const { Search } = Input
 
 interface LogsPageProps {
@@ -15,13 +15,7 @@ const LogsPage: React.FC<LogsPageProps> = () => {
   const { filteredLogs, clearLogs, filterLevel, setFilterLevel, logs } = useLog()
   const [searchText, setSearchText] = useState('')
 
-  // 刷新日志页面的函数
-  const refreshLogs = () => {
-    // 这里可以添加刷新日志的逻辑，比如重新获取日志等
-    // 目前日志是实时更新的，所以刷新操作可以是清空搜索或重置筛选
-    setSearchText('')
-    setFilterLevel('all')
-  }
+
 
   const getLevelColor = (level: LogLevel) => {
     switch (level) {

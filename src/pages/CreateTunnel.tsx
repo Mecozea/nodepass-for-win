@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Card, Button, Form, Input, Select, Space, message, Row, Col, Modal, Descriptions } from 'antd'
+import { Card, Button, Form, Input, Select, Space, message, Row, Col, Modal } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import {
   CheckCircleOutlined,
@@ -13,7 +13,6 @@ import { useLog } from '../context/LogContext'
 import { useTunnel } from '../context/TunnelContext'
 
 const { Option } = Select
-const { TextArea } = Input
 
 // 创建隧道时的表单数据接口
 interface CreateTunnelForm {
@@ -163,8 +162,6 @@ const CreateTunnel: React.FC = () => {
 
   const renderStepContent = () => {
     // 网络和安全配置内容
-    const currentMode = form.getFieldValue('mode') || selectedMode
-    
     return (
       <Form.Item noStyle shouldUpdate={(prevValues, currentValues) => 
         prevValues.tlsMode !== currentValues.tlsMode || prevValues.mode !== currentValues.mode

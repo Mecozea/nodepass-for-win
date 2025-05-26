@@ -117,6 +117,13 @@ async fn start_nodepass(
     cmd.args(&command_args);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    
+    // 在Windows上隐藏终端窗口
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
 
     let mut child = cmd.spawn().map_err(|e| format!("启动进程失败: {}", e))?;
     let child_id = child.id().unwrap_or(0);
@@ -237,8 +244,10 @@ async fn stop_nodepass_by_pid(
     // 在Windows上，使用taskkill按PID停止进程
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         let output = std::process::Command::new("taskkill")
             .args(&["/F", "/PID", &process_id.to_string()])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .output()
             .map_err(|e| format!("执行taskkill失败: {}", e))?;
             
@@ -344,9 +353,17 @@ async fn check_nodepass_status() -> Result<NodePassStatus, String> {
     match nodepass_path {
         Some(path) => {
             // 尝试获取版本信息 - NodePass在--help时会输出版本信息到stderr
-            let version_result = std::process::Command::new(&path)
-                .arg("--help")
-                .output();
+            let mut cmd = std::process::Command::new(&path);
+            cmd.arg("--help");
+            
+            // 在Windows上隐藏终端窗口
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+            
+            let version_result = cmd.output();
                 
             match version_result {
                 Ok(output) => {
@@ -760,8 +777,10 @@ async fn cancel_download() -> Result<(), String> {
 async fn open_directory(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("explorer")
             .arg(&path)
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .spawn()
             .map_err(|e| format!("打开目录失败: {}", e))?;
     }
@@ -827,8 +846,10 @@ async fn exit_app(app_handle: AppHandle, state: tauri::State<'_, AppState>) -> R
     for process_id in process_ids {
         #[cfg(target_os = "windows")]
         {
+            use std::os::windows::process::CommandExt;
             let _ = std::process::Command::new("taskkill")
                 .args(&["/F", "/PID", &process_id.to_string()])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
                 .output();
         }
         
@@ -890,7 +911,7 @@ async fn set_window_theme(app_handle: AppHandle, _theme: String) -> Result<(), S
 #[tauri::command]
 async fn initialize_window_theme(app_handle: AppHandle) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
-        // 强制设置为深色主题，确保系统框颜色为深色
+        // 设置为深色主题，确保系统框颜色为深色（对应#131B2C的深色标题栏）
         let _ = window.set_theme(Some(tauri::Theme::Dark));
         
         #[cfg(target_os = "windows")]
@@ -925,8 +946,10 @@ async fn get_app_version() -> Result<String, String> {
 async fn open_url_in_default_browser(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("cmd")
             .args(&["/c", "start", &url])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .spawn()
             .map_err(|e| format!("打开浏览器失败: {}", e))?;
     }
@@ -1327,6 +1350,7 @@ fn detect_system_proxy() -> Option<String> {
 #[cfg(target_os = "windows")]
 fn is_github_bypassed() -> bool {
     use std::process::Command;
+    use std::os::windows::process::CommandExt;
     
     // 检查IE代理绕过列表
     let output = Command::new("reg")
@@ -1336,6 +1360,7 @@ fn is_github_bypassed() -> bool {
             "/v",
             "ProxyOverride"
         ])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output();
         
     if let Ok(output) = output {
@@ -1362,10 +1387,12 @@ fn is_github_bypassed() -> bool {
 #[cfg(target_os = "windows")]
 fn detect_windows_proxy() -> Option<String> {
     use std::process::Command;
+    use std::os::windows::process::CommandExt;
     
     // 使用netsh命令检测代理设置
     let output = Command::new("netsh")
         .args(&["winhttp", "show", "proxy"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
         .ok()?;
     
@@ -1395,6 +1422,7 @@ fn detect_windows_proxy() -> Option<String> {
 #[cfg(target_os = "windows")]
 fn detect_ie_proxy() -> Option<String> {
     use std::process::Command;
+    use std::os::windows::process::CommandExt;
     
     // 使用reg命令读取注册表
     let output = Command::new("reg")
@@ -1404,6 +1432,7 @@ fn detect_ie_proxy() -> Option<String> {
             "/v",
             "ProxyServer"
         ])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
         .ok()?;
     
@@ -1440,7 +1469,7 @@ pub fn run() {
             
             // 基于Tauri v2官方文档设置窗口主题
             if let Some(window) = app.get_webview_window("main") {
-                // 立即设置深色主题，确保系统框颜色为深色（对应#131B2C）
+                // 设置深色主题，确保系统框颜色为深色（对应#131B2C的深色标题栏）
                 let _ = window.set_theme(Some(tauri::Theme::Dark));
                 
                 #[cfg(target_os = "windows")]

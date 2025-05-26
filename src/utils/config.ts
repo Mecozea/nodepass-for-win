@@ -55,7 +55,7 @@ export interface AppConfig {
 const DEFAULT_CONFIG: AppConfig = {
   tunnels: [],
   settings: {
-    theme: 'dark',
+    theme: 'light',
     language: 'zh',
     autoStart: false,
     minimizeToTray: true,

@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Space, Tag, Modal, message, Card, Tooltip, Popconfirm, Row, Col, Statistic, List, Typography, Input, Radio } from 'antd'
+import { Table, Button, Space, Tag, Modal, message, Card, Tooltip, Popconfirm, Row, Col, Typography, Input, Radio } from 'antd'
 import { 
-  PlusOutlined,
   DatabaseOutlined,
-  ExclamationCircleOutlined,
   CheckCircleOutlined,
   StopOutlined,
   WarningOutlined
@@ -86,12 +84,7 @@ const StatCard: React.FC<{
   )
 }
 
-interface TunnelProcess {
-  id: string
-  processId: number
-  status: 'running' | 'stopped' | 'error'
-  logs: string[]
-}
+
 
 interface NodePassLogEvent {
   tunnel_id: string
@@ -123,7 +116,7 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
   const [loading, setLoading] = useState(false)
   const [selectedTunnel, setSelectedTunnel] = useState<TunnelConfig | null>(null)
   const [logModalVisible, setLogModalVisible] = useState(false)
-  const [tunnelProcesses, setTunnelProcesses] = useState<Map<string, TunnelProcess>>(new Map())
+
   const [tunnelLogs, setTunnelLogs] = useState<string[]>([])
   const logContainerRef = React.useRef<HTMLDivElement>(null)
   const [stats, setStats] = useState({
@@ -359,13 +352,7 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
       // 记录隧道启动时间
       setTunnelStartTimes(prev => new Map(prev.set(tunnel.id, Date.now())))
       
-      // 更新本地进程状态
-      setTunnelProcesses(prev => new Map(prev.set(tunnel.id, {
-        id: tunnel.id,
-        processId: processId,
-        status: 'running',
-        logs: []
-      })))
+
 
       message.success(`隧道 ${tunnel.name} 启动成功，进程ID: ${processId}`)
       addLog('info', `隧道 ${tunnel.name} 启动成功，进程ID: ${processId}`, 'TunnelManagement')
@@ -407,12 +394,7 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
           processId: undefined
         })
         
-        // 移除本地进程状态
-        setTunnelProcesses(prev => {
-          const newMap = new Map(prev)
-          newMap.delete(tunnel.id)
-          return newMap
-        })
+
         
         // 清除启动时间记录
         setTunnelStartTimes(prev => {
@@ -478,18 +460,7 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
     }).replace(/\//g, '-')
   }
 
-  const getStatusTag = (status: string) => {
-    switch (status) {
-      case 'running':
-        return <Tag color="success">运行中</Tag>
-      case 'stopped':
-        return <Tag color="default">已停止</Tag>
-      case 'error':
-        return <Tag color="error">错误</Tag>
-      default:
-        return <Tag>未知</Tag>
-    }
-  }
+
 
   const getModeTag = (mode: string) => {
     switch (mode) {
