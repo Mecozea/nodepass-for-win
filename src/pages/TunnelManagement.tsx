@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Space, Tag, Modal, message, Card, Tooltip, Popconfirm, Row, Col, Typography, Input, Radio } from 'antd'
+import { Table, Button, Space, Tag, message, Card, Tooltip, Popconfirm, Row, Col, Input, Radio } from 'antd'
 import { 
   DatabaseOutlined,
   CheckCircleOutlined,
@@ -16,7 +16,7 @@ import { useLog } from '../context/LogContext'
 import { useSettings } from '../context/SettingsContext'
 import { useTunnel } from '../context/TunnelContext'
 
-const { Text } = Typography
+// const { Text } = Typography // 暂时不需要
 
 // 统计卡片组件
 const StatCard: React.FC<{
@@ -549,11 +549,11 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
     navigate(`/tunnels/${tunnel.id}/details`)
   }
 
-  // 添加隧道
-  const handleCreateTunnel = () => {
-    console.log('导航到创建隧道页面')
-    navigate('/tunnels/create')
-  }
+  // 添加隧道 - 已在按钮中直接使用 navigate
+  // const handleCreateTunnel = () => {
+  //   console.log('导航到创建隧道页面')
+  //   navigate('/tunnels/create')
+  // }
 
   // 表格列配置
   const columns = [

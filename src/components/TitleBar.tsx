@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { Button, App } from 'antd'
+import { Button } from 'antd'
 import { MinusOutlined, BorderOutlined, CloseOutlined, CopyOutlined } from '@ant-design/icons'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import './TitleBar.css'
 
 const TitleBar: React.FC = () => {
   const [isMaximized, setIsMaximized] = useState(false)
-  const { message } = App.useApp()
   const appWindow = getCurrentWindow()
 
   useEffect(() => {
