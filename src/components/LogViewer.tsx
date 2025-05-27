@@ -8,10 +8,9 @@ interface LogViewerProps {
   open: boolean
   onClose: () => void
   logs: string[]
-  containerRef?: React.RefObject<HTMLDivElement>
 }
 
-const LogViewer: React.FC<LogViewerProps> = ({ open, onClose, logs, containerRef }) => {
+const LogViewer: React.FC<LogViewerProps> = ({ open, onClose, logs }) => {
   const { clearLogs } = useLog()
   const logContainerRef = useRef<HTMLDivElement>(null)
   const ansiConverter = useRef(new AnsiToHtml({

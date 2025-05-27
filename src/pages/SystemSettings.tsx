@@ -11,8 +11,7 @@ import {
   faMoon, 
   faDesktop, 
   faChevronRight,
-  faFolder,
-  faGear
+  faFolder
 } from '@fortawesome/free-solid-svg-icons'
 import { faGithub } from '@fortawesome/free-brands-svg-icons'
 import { invoke } from '@tauri-apps/api/core'
@@ -154,6 +153,7 @@ const SystemSettings: React.FC<SystemSettingsProps> = () => {
   const getAppVersion = async () => {
     try {
       const version = await invoke<string>('get_app_version')
+      console.log('获取到的应用版本:', version)
       setAppVersion(version)
     } catch (error) {
       console.error('获取应用版本失败:', error)

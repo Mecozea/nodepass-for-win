@@ -1,16 +1,12 @@
 import React, { useEffect } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { ConfigProvider, Modal, message, theme } from 'antd'
+import { BrowserRouter as Router } from 'react-router-dom'
+import { ConfigProvider, Modal, message } from 'antd'
 import { ExclamationCircleOutlined } from '@ant-design/icons'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import TitleBar from './components/TitleBar'
 import Layout from './components/Layout'
-import TunnelManagement from './pages/TunnelManagement'
-import CreateTunnel from './pages/CreateTunnel'
-import LogsPage from './pages/LogsPage'
-import SystemSettings from './pages/SystemSettings'
-import TunnelLog from './pages/TunnelLog'
+import AppRoutes from './routes'
 import { SettingsProvider, useSettings } from './context/SettingsContext'
 import { LogProvider } from './context/LogContext'
 import { TunnelProvider } from './context/TunnelContext'
@@ -48,7 +44,11 @@ const AppContent: React.FC = () => {
         },
         onCancel: async () => {
           try {
-            // 停止所有隧道进程并退出应用
+            console.log('用户选择完全退出应用，正在停止所有隧道...')
+            // 先停止所有隧道进程
+            await invoke('stop_all_nodepass')
+            console.log('所有隧道已停止，正在退出应用...')
+            // 然后退出应用
             await invoke('exit_app')
           } catch (error) {
             console.error('退出应用失败:', error)
@@ -96,14 +96,7 @@ const AppContent: React.FC = () => {
         <div className="app-content-with-titlebar">
           <Router>
             <Layout>
-              <Routes>
-                <Route path="/" element={<Navigate to="/tunnels" replace />} />
-                <Route path="/tunnels" element={<TunnelManagement />} />
-                <Route path="/create-tunnel" element={<CreateTunnel />} />
-                <Route path="/logs" element={<LogsPage />} />
-                <Route path="/settings" element={<SystemSettings />} />
-                <Route path="/tunnel/:id/log" element={<TunnelLog />} />
-              </Routes>
+              <AppRoutes />
             </Layout>
           </Router>
         </div>

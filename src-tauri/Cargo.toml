@@ -1,6 +1,6 @@
 [package]
 name = "nodepass-gui"
-version = "0.0.1"
+version = "0.0.2-dev"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -44,4 +44,7 @@ lazy_static = "1.4"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winuser", "libloaderapi", "dwmapi", "errhandlingapi"] }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-window-state = "2"
 

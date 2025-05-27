@@ -1,21 +1,25 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use flate2::read::GzDecoder;
+use lazy_static;
+use reqwest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, Manager, WindowEvent, tray::{TrayIconBuilder, TrayIconEvent}, menu::{Menu, MenuItem}};
-use tokio::io::{AsyncBufReadExt, BufReader, AsyncWriteExt};
-use tokio::process::Command as TokioCommand;
-use tokio_stream::StreamExt;
-use reqwest;
-use flate2::read::GzDecoder;
+use std::sync::{Arc, Mutex};
 use tar::Archive;
-use std::process::{Command, Child};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, WindowEvent, Window,
+};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
-use lazy_static;
+use tokio_stream::StreamExt;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct NodePassConfig {
@@ -81,6 +85,14 @@ type ProcessMap = Arc<Mutex<HashMap<u32, ProcessInfo>>>;
 // 全局下载取消标志
 static DOWNLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+// 检查是否为致命错误日志 - 只检测 "ERROR Resolve failed"
+fn is_fatal_error_log(log_line: &str) -> bool {
+    let line_lower = log_line.to_lowercase();
+    
+    // 检查是否同时包含 ERROR 和 Resolve failed
+    line_lower.contains("error") && line_lower.contains("resolve failed")
+}
+
 struct AppState {
     processes: ProcessMap,
     config_file: PathBuf,
@@ -91,11 +103,11 @@ impl AppState {
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("nodepass-gui");
-        
+
         if !config_dir.exists() {
             let _ = fs::create_dir_all(&config_dir);
         }
-        
+
         Self {
             processes: Arc::new(Mutex::new(HashMap::new())),
             config_file: config_dir.join("configs.json"),
@@ -114,7 +126,7 @@ struct ProcessMonitor {
 impl ProcessMonitor {
     async fn start_monitoring(self) {
         let (tx, mut rx) = mpsc::channel(100);
-        
+
         // 启动日志监控
         let log_tx = tx.clone();
         let id = self.id.clone();
@@ -123,15 +135,19 @@ impl ProcessMonitor {
                 let mut processes = PROCESSES.lock().unwrap();
                 processes.get_mut(&id).and_then(|p| p.stdout.take())
             };
-            
+
             if let Some(stdout) = process {
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    if log_tx.send(LogMessage {
-                        id: id.clone(),
-                        message: line,
-                    }).await.is_err() {
+                    if log_tx
+                        .send(LogMessage {
+                            id: id.clone(),
+                            message: line,
+                        })
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -149,46 +165,51 @@ impl ProcessMonitor {
                     match windows::Win32::System::Threading::OpenProcess(
                         windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION,
                         false,
-                        pid
+                        pid,
                     ) {
                         Ok(handle) => {
                             let mut exit_code = 0;
                             let result = windows::Win32::System::Threading::GetExitCodeProcess(
                                 handle,
-                                &mut exit_code
+                                &mut exit_code,
                             );
                             result.as_bool() && exit_code == 259 // STILL_ACTIVE
                         }
-                        Err(_) => false
+                        Err(_) => false,
                     }
                 };
 
                 if !is_running {
-                    if status_tx.send(LogMessage {
-                        id: id.clone(),
-                        message: "进程已意外退出".to_string(),
-                    }).await.is_err() {
+                    if status_tx
+                        .send(LogMessage {
+                            id: id.clone(),
+                            message: "进程已意外退出".to_string(),
+                        })
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
-                    
+
                     // 更新状态
                     let mut tunnels = TUNNELS.lock().unwrap();
                     if let Some(tunnel) = tunnels.get_mut(&id) {
                         tunnel.status = "stopped".to_string();
                         tunnel.pid = None;
                     }
-                    
+
                     // 发送状态更新事件
-                    let _ = app_handle.emit("tunnel-status-changed", 
+                    let _ = app_handle.emit(
+                        "tunnel-status-changed",
                         serde_json::json!({
                             "id": id,
                             "status": "stopped",
                             "pid": null
-                        })
+                        }),
                     );
                     break;
                 }
-                
+
                 sleep(Duration::from_secs(1)).await;
             }
         });
@@ -197,11 +218,12 @@ impl ProcessMonitor {
         let app_handle = self.app_handle;
         while let Some(msg) = rx.recv().await {
             // 发送日志到前端
-            let _ = app_handle.emit("tunnel-log", 
+            let _ = app_handle.emit(
+                "tunnel-log",
                 serde_json::json!({
                     "id": msg.id,
                     "message": msg.message
-                })
+                }),
             );
         }
     }
@@ -232,18 +254,19 @@ async fn start_nodepass(
     config: NodePassConfig,
     tunnel_id: String,
 ) -> Result<u32, String> {
-    let nodepass_path = find_nodepass_executable_with_handle(&app_handle)
-        .ok_or_else(|| "未找到NodePass可执行文件，请确保nodepass.exe在PATH中或当前目录下".to_string())?;
+    let nodepass_path = find_nodepass_executable_with_handle(&app_handle).ok_or_else(|| {
+        "未找到NodePass可执行文件，请确保nodepass.exe在PATH中或当前目录下".to_string()
+    })?;
 
     let command_args = build_nodepass_command(&config)?;
-    
+
     println!("启动NodePass: {} {}", nodepass_path, command_args.join(" "));
 
     let mut cmd = TokioCommand::new(&nodepass_path);
     cmd.args(&command_args);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-    
+
     // 在Windows上隐藏终端窗口
     #[cfg(target_os = "windows")]
     {
@@ -253,21 +276,51 @@ async fn start_nodepass(
 
     let mut child = cmd.spawn().map_err(|e| format!("启动进程失败: {}", e))?;
     let child_id = child.id().unwrap_or(0);
-    
+
     // 创建日志存储
     let logs = Arc::new(Mutex::new(Vec::new()));
-    
+
     // 处理stdout
     if let Some(stdout) = child.stdout.take() {
         let app_handle_clone = app_handle.clone();
         let tunnel_id_clone = tunnel_id.clone();
         let logs_clone = logs.clone();
+        let child_id_for_stdout = child_id;
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 let log_message = format!("[INFO] {}", line);
-                
+
+                // 检查是否包含致命错误
+                let is_fatal_error = is_fatal_error_log(&line);
+
+                if is_fatal_error {
+                    println!("检测到致命错误日志，准备停止隧道: {}", line);
+                    
+                    // 发送错误日志
+                    let _ = app_handle_clone.emit(
+                        "app-log",
+                        serde_json::json!({
+                            "level": "error",
+                            "message": format!("隧道 {} 检测到致命错误: {}", tunnel_id_clone, line),
+                            "source": "LogMonitor"
+                        }),
+                    );
+
+                    // 发送致命错误事件，让主线程处理进程停止
+                    let _ = app_handle_clone.emit(
+                        "fatal-error-detected",
+                        serde_json::json!({
+                            "tunnel_id": tunnel_id_clone,
+                            "pid": child_id_for_stdout,
+                            "error": line
+                        }),
+                    );
+                    
+                    break; // 退出日志监听循环
+                }
+
                 // 存储到日志
                 if let Ok(mut log_vec) = logs_clone.lock() {
                     log_vec.push(log_message.clone());
@@ -276,12 +329,15 @@ async fn start_nodepass(
                         log_vec.drain(0..100); // 删除前100条
                     }
                 }
-                
+
                 // 发送日志到前端
-                let _ = app_handle_clone.emit("tunnel-log", serde_json::json!({
-                    "tunnel_id": tunnel_id_clone,
-                    "message": log_message
-                }));
+                let _ = app_handle_clone.emit(
+                    "tunnel-log",
+                    serde_json::json!({
+                        "tunnel_id": tunnel_id_clone,
+                        "message": log_message
+                    }),
+                );
             }
         });
     }
@@ -291,12 +347,42 @@ async fn start_nodepass(
         let app_handle_clone = app_handle.clone();
         let tunnel_id_clone = tunnel_id.clone();
         let logs_clone = logs.clone();
+        let child_id_for_stderr = child_id;
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 let log_message = format!("[ERROR] {}", line);
-                
+
+                // 检查是否包含致命错误
+                let is_fatal_error = is_fatal_error_log(&line);
+
+                if is_fatal_error {
+                    println!("检测到致命错误日志 (stderr)，准备停止隧道: {}", line);
+                    
+                    // 发送错误日志
+                    let _ = app_handle_clone.emit(
+                        "app-log",
+                        serde_json::json!({
+                            "level": "error",
+                            "message": format!("隧道 {} 检测到致命错误: {}", tunnel_id_clone, line),
+                            "source": "LogMonitor"
+                        }),
+                    );
+
+                    // 发送致命错误事件，让主线程处理进程停止
+                    let _ = app_handle_clone.emit(
+                        "fatal-error-detected",
+                        serde_json::json!({
+                            "tunnel_id": tunnel_id_clone,
+                            "pid": child_id_for_stderr,
+                            "error": line
+                        }),
+                    );
+                    
+                    break; // 退出日志监听循环
+                }
+
                 // 存储到日志
                 if let Ok(mut log_vec) = logs_clone.lock() {
                     log_vec.push(log_message.clone());
@@ -305,12 +391,15 @@ async fn start_nodepass(
                         log_vec.drain(0..100); // 删除前100条
                     }
                 }
-                
+
                 // 发送日志到前端
-                let _ = app_handle_clone.emit("tunnel-log", serde_json::json!({
-                    "tunnel_id": tunnel_id_clone,
-                    "message": log_message
-                }));
+                let _ = app_handle_clone.emit(
+                    "tunnel-log",
+                    serde_json::json!({
+                        "tunnel_id": tunnel_id_clone,
+                        "message": log_message
+                    }),
+                );
             }
         });
     }
@@ -322,28 +411,69 @@ async fn start_nodepass(
     let child_id_clone = child_id;
     tokio::spawn(async move {
         let status = child.wait().await;
-        
+
+        println!("隧道进程 {} (PID: {}) 已退出", tunnel_id_clone, child_id_clone);
+
         // 从进程映射中移除
         if let Ok(mut processes) = processes_clone.lock() {
             processes.remove(&child_id_clone);
         }
-        
+
+        // 更新全局隧道状态
+        {
+            let mut tunnels = TUNNELS.lock().unwrap();
+            tunnels.remove(&tunnel_id_clone);
+        }
+
         match status {
             Ok(exit_status) => {
-                let _ = app_handle_clone.emit("tunnel-status-changed", serde_json::json!({
-                    "tunnel_id": tunnel_id_clone,
-                    "status": "stopped",
-                    "pid": null,
-                    "exit_code": exit_status.code().unwrap_or(-1)
-                }));
+                let exit_code = exit_status.code().unwrap_or(-1);
+                println!("隧道 {} 正常退出，退出码: {}", tunnel_id_clone, exit_code);
+                
+                // 发送应用日志
+                let _ = app_handle_clone.emit(
+                    "app-log",
+                    serde_json::json!({
+                        "level": "info",
+                        "message": format!("隧道 {} 进程已退出，退出码: {}", tunnel_id_clone, exit_code),
+                        "source": "ProcessMonitor"
+                    }),
+                );
+
+                // 发送隧道状态变化事件
+                let _ = app_handle_clone.emit(
+                    "tunnel-status-changed",
+                    serde_json::json!({
+                        "tunnel_id": tunnel_id_clone,
+                        "status": "stopped",
+                        "pid": null,
+                        "exit_code": exit_code
+                    }),
+                );
             }
             Err(e) => {
-                let _ = app_handle_clone.emit("tunnel-status-changed", serde_json::json!({
-                    "tunnel_id": tunnel_id_clone,
-                    "status": "error",
-                    "pid": null,
-                    "error": e.to_string()
-                }));
+                println!("隧道 {} 异常退出: {}", tunnel_id_clone, e);
+                
+                // 发送应用日志
+                let _ = app_handle_clone.emit(
+                    "app-log",
+                    serde_json::json!({
+                        "level": "error",
+                        "message": format!("隧道 {} 进程异常退出: {}", tunnel_id_clone, e),
+                        "source": "ProcessMonitor"
+                    }),
+                );
+
+                // 发送隧道状态变化事件
+                let _ = app_handle_clone.emit(
+                    "tunnel-status-changed",
+                    serde_json::json!({
+                        "tunnel_id": tunnel_id_clone,
+                        "status": "error",
+                        "pid": null,
+                        "error": e.to_string()
+                    }),
+                );
             }
         }
     });
@@ -362,23 +492,56 @@ async fn start_nodepass(
     // 更新隧道状态
     {
         let mut tunnels = TUNNELS.lock().unwrap();
-        tunnels.insert(tunnel_id.clone(), TunnelInfo {
-            status: "running".to_string(),
-            pid: Some(child_id),
-        });
+        tunnels.insert(
+            tunnel_id.clone(),
+            TunnelInfo {
+                status: "running".to_string(),
+                pid: Some(child_id),
+            },
+        );
     }
 
     // 发送状态更新事件
-    let _ = app_handle.emit("tunnel-status-changed", serde_json::json!({
-        "tunnel_id": tunnel_id,
-        "status": "running",
-        "pid": child_id
-    }));
+    let _ = app_handle.emit(
+        "tunnel-status-changed",
+        serde_json::json!({
+            "tunnel_id": tunnel_id,
+            "status": "running",
+            "pid": child_id
+        }),
+    );
 
     // 更新托盘tooltip
     let _ = update_tray_tooltip(app_handle.clone(), state.clone()).await;
 
     Ok(child_id)
+}
+
+#[tauri::command]
+async fn handle_fatal_error(
+    app_handle: AppHandle,
+    state: tauri::State<'_, AppState>,
+    tunnel_id: String,
+    process_id: u32,
+    error_message: String,
+) -> Result<(), String> {
+    println!("处理致命错误: 隧道 {} (PID: {}) - {}", tunnel_id, process_id, error_message);
+    
+    // 停止进程
+    let _ = stop_nodepass_by_pid(app_handle.clone(), state, process_id).await;
+    
+    // 发送隧道状态变化事件
+    let _ = app_handle.emit(
+        "tunnel-status-changed",
+        serde_json::json!({
+            "tunnel_id": tunnel_id,
+            "status": "error",
+            "pid": null,
+            "error": format!("检测到致命错误: {}", error_message)
+        }),
+    );
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -396,7 +559,7 @@ async fn stop_nodepass_by_pid(
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .output()
             .map_err(|e| format!("执行taskkill失败: {}", e))?;
-            
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("停止进程失败: {}", stderr));
@@ -410,7 +573,7 @@ async fn stop_nodepass_by_pid(
             .args(&["-9", &process_id.to_string()])
             .output()
             .map_err(|e| format!("执行kill失败: {}", e))?;
-            
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("停止进程失败: {}", stderr));
@@ -429,7 +592,10 @@ async fn stop_nodepass_by_pid(
 }
 
 #[tauri::command]
-async fn stop_all_nodepass(app_handle: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+async fn stop_all_nodepass(
+    app_handle: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     let process_ids: Vec<u32> = {
         if let Ok(processes) = state.processes.lock() {
             processes.keys().cloned().collect()
@@ -438,8 +604,46 @@ async fn stop_all_nodepass(app_handle: AppHandle, state: tauri::State<'_, AppSta
         }
     };
 
-    for process_id in process_ids {
-        let _ = stop_nodepass_by_pid(app_handle.clone(), state.clone(), process_id).await;
+    if !process_ids.is_empty() {
+        let process_count = process_ids.len();
+        println!("正在停止所有 {} 个隧道进程...", process_count);
+        
+        // 发送日志事件到前端
+        let _ = app_handle.emit(
+            "app-log",
+            serde_json::json!({
+                "level": "info",
+                "message": format!("正在停止所有 {} 个隧道进程...", process_count),
+                "source": "StopAllHandler"
+            }),
+        );
+
+        for process_id in process_ids {
+            let _ = stop_nodepass_by_pid(app_handle.clone(), state.clone(), process_id).await;
+        }
+
+        // 发送所有隧道已停止的事件
+        let _ = app_handle.emit(
+            "all-tunnels-stopped",
+            serde_json::json!({
+                "message": "所有隧道已停止",
+                "stopped_count": process_count
+            }),
+        );
+
+        println!("已停止所有 {} 个隧道进程", process_count);
+    } else {
+        println!("没有运行中的隧道进程需要停止");
+        
+        // 发送日志事件到前端
+        let _ = app_handle.emit(
+            "app-log",
+            serde_json::json!({
+                "level": "info",
+                "message": "没有运行中的隧道进程需要停止",
+                "source": "StopAllHandler"
+            }),
+        );
     }
 
     Ok(())
@@ -466,21 +670,20 @@ async fn save_config(
     config: NodePassConfig,
 ) -> Result<(), String> {
     let mut configs = load_configs(&state.config_file).unwrap_or_default();
-    
+
     // 检查是否已存在相同配置
-    if !configs.iter().any(|c| 
-        c.mode == config.mode 
-        && c.tunnel_addr == config.tunnel_addr 
-        && c.target_addr == config.target_addr
-    ) {
+    if !configs.iter().any(|c| {
+        c.mode == config.mode
+            && c.tunnel_addr == config.tunnel_addr
+            && c.target_addr == config.target_addr
+    }) {
         configs.push(config);
     }
 
-    let config_json = serde_json::to_string_pretty(&configs)
-        .map_err(|e| format!("序列化配置失败: {}", e))?;
+    let config_json =
+        serde_json::to_string_pretty(&configs).map_err(|e| format!("序列化配置失败: {}", e))?;
 
-    fs::write(&state.config_file, config_json)
-        .map_err(|e| format!("保存配置文件失败: {}", e))?;
+    fs::write(&state.config_file, config_json).map_err(|e| format!("保存配置文件失败: {}", e))?;
 
     Ok(())
 }
@@ -495,32 +698,32 @@ async fn get_saved_configs(
 #[tauri::command]
 async fn check_nodepass_status() -> Result<NodePassStatus, String> {
     let nodepass_path = find_nodepass_executable();
-    
+
     match nodepass_path {
         Some(path) => {
             // 尝试获取版本信息 - NodePass在--help时会输出版本信息到stderr
             let mut cmd = std::process::Command::new(&path);
             cmd.arg("--help");
-            
+
             // 在Windows上隐藏终端窗口
             #[cfg(target_os = "windows")]
             {
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
             }
-            
+
             let version_result = cmd.output();
-                
+
             match version_result {
                 Ok(output) => {
                     // NodePass会输出版本信息到stderr，格式如: "Version: v1.2.4 windows/amd64"
                     let stderr_output = String::from_utf8_lossy(&output.stderr);
                     let stdout_output = String::from_utf8_lossy(&output.stdout);
                     let combined_output = format!("{}\n{}", stderr_output, stdout_output);
-                    
+
                     // 查找版本信息
                     let version = extract_version_from_output(&combined_output);
-                    
+
                     Ok(NodePassStatus {
                         installed: true,
                         version,
@@ -528,24 +731,20 @@ async fn check_nodepass_status() -> Result<NodePassStatus, String> {
                         error: None,
                     })
                 }
-                Err(e) => {
-                    Ok(NodePassStatus {
-                        installed: false,
-                        version: None,
-                        path: Some(path),
-                        error: Some(format!("执行失败: {}", e)),
-                    })
-                }
+                Err(e) => Ok(NodePassStatus {
+                    installed: false,
+                    version: None,
+                    path: Some(path),
+                    error: Some(format!("执行失败: {}", e)),
+                }),
             }
         }
-        None => {
-            Ok(NodePassStatus {
-                installed: false,
-                version: None,
-                path: None,
-                error: Some("未找到NodePass可执行文件".to_string()),
-            })
-        }
+        None => Ok(NodePassStatus {
+            installed: false,
+            version: None,
+            path: None,
+            error: Some("未找到NodePass可执行文件".to_string()),
+        }),
     }
 }
 
@@ -579,15 +778,15 @@ async fn download_nodepass(
     proxy_settings: Option<ProxySettings>,
 ) -> Result<String, String> {
     println!("开始下载: {} -> {}", download_url, filename);
-    
+
     // 重置取消标志
     DOWNLOAD_CANCELLED.store(false, Ordering::Relaxed);
-    
+
     // 获取系统临时目录
     let temp_dir = std::env::temp_dir();
     let target_path = temp_dir.join(&filename);
     println!("临时下载路径: {:?}", target_path);
-    
+
     // 获取最终的安装目录（使用可执行文件所在目录）
     let install_dir = match std::env::current_exe() {
         Ok(exe_path) => {
@@ -597,30 +796,39 @@ async fn download_nodepass(
             } else {
                 let error_msg = "无法获取可执行文件父目录".to_string();
                 println!("错误: {}", error_msg);
-                let _ = app_handle.emit("download-progress", serde_json::json!({
-                    "status": "error",
-                    "message": error_msg
-                }));
+                let _ = app_handle.emit(
+                    "download-progress",
+                    serde_json::json!({
+                        "status": "error",
+                        "message": error_msg
+                    }),
+                );
                 return Err(error_msg);
             }
         }
         Err(e) => {
             let error_msg = format!("获取可执行文件路径失败: {}", e);
             println!("错误: {}", error_msg);
-            let _ = app_handle.emit("download-progress", serde_json::json!({
-                "status": "error",
-                "message": error_msg
-            }));
+            let _ = app_handle.emit(
+                "download-progress",
+                serde_json::json!({
+                    "status": "error",
+                    "message": error_msg
+                }),
+            );
             return Err(error_msg);
         }
     };
     println!("安装目录: {:?}", install_dir);
-    
+
     // 发送开始下载事件
-    let _ = app_handle.emit("download-progress", serde_json::json!({
-        "status": "started",
-        "message": "正在初始化下载..."
-    }));
+    let _ = app_handle.emit(
+        "download-progress",
+        serde_json::json!({
+            "status": "started",
+            "message": "正在初始化下载..."
+        }),
+    );
 
     // 创建HTTP客户端，支持用户配置的代理
     let mut client_builder = reqwest::Client::builder()
@@ -634,28 +842,41 @@ async fn download_nodepass(
             let proxy_url = if proxy.username.is_empty() {
                 format!("{}://{}:{}", proxy.proxy_type, proxy.host, proxy.port)
             } else {
-                format!("{}://{}:{}@{}:{}", 
-                    proxy.proxy_type, proxy.username, proxy.password, proxy.host, proxy.port)
+                format!(
+                    "{}://{}:{}@{}:{}",
+                    proxy.proxy_type, proxy.username, proxy.password, proxy.host, proxy.port
+                )
             };
-            
+
             println!("使用用户配置的代理: {}", proxy_url);
-            proxy_info = format!("使用{}代理: {}:{}", proxy.proxy_type.to_uppercase(), proxy.host, proxy.port);
-            
+            proxy_info = format!(
+                "使用{}代理: {}:{}",
+                proxy.proxy_type.to_uppercase(),
+                proxy.host,
+                proxy.port
+            );
+
             match reqwest::Proxy::all(&proxy_url) {
                 Ok(proxy_config) => {
                     client_builder = client_builder.proxy(proxy_config);
-                    let _ = app_handle.emit("download-progress", serde_json::json!({
-                        "status": "started",
-                        "message": format!("已配置代理: {}:{}", proxy.host, proxy.port)
-                    }));
+                    let _ = app_handle.emit(
+                        "download-progress",
+                        serde_json::json!({
+                            "status": "started",
+                            "message": format!("已配置代理: {}:{}", proxy.host, proxy.port)
+                        }),
+                    );
                 }
                 Err(e) => {
                     let error_msg = format!("配置代理失败: {}", e);
                     println!("错误: {}", error_msg);
-                    let _ = app_handle.emit("download-progress", serde_json::json!({
-                        "status": "error",
-                        "message": error_msg
-                    }));
+                    let _ = app_handle.emit(
+                        "download-progress",
+                        serde_json::json!({
+                            "status": "error",
+                            "message": error_msg
+                        }),
+                    );
                     return Err(error_msg);
                 }
             }
@@ -668,14 +889,17 @@ async fn download_nodepass(
         if let Some(system_proxy_url) = detect_system_proxy() {
             println!("检测到系统代理: {}", system_proxy_url);
             proxy_info = format!("系统代理: {}", system_proxy_url);
-            
+
             match reqwest::Proxy::all(&system_proxy_url) {
                 Ok(proxy_config) => {
                     client_builder = client_builder.proxy(proxy_config);
-                    let _ = app_handle.emit("download-progress", serde_json::json!({
-                        "status": "started",
-                        "message": format!("使用系统代理: {}", system_proxy_url)
-                    }));
+                    let _ = app_handle.emit(
+                        "download-progress",
+                        serde_json::json!({
+                            "status": "started",
+                            "message": format!("使用系统代理: {}", system_proxy_url)
+                        }),
+                    );
                 }
                 Err(e) => {
                     println!("配置系统代理失败: {}, 使用直连", e);
@@ -692,41 +916,46 @@ async fn download_nodepass(
         Ok(client) => {
             println!("HTTP客户端创建成功");
             client
-        },
+        }
         Err(e) => {
             let error_msg = format!("创建HTTP客户端失败: {}", e);
             println!("错误: {}", error_msg);
-            let _ = app_handle.emit("download-progress", serde_json::json!({
-                "status": "error",
-                "message": error_msg
-            }));
+            let _ = app_handle.emit(
+                "download-progress",
+                serde_json::json!({
+                    "status": "error",
+                    "message": error_msg
+                }),
+            );
             return Err(error_msg);
         }
     };
 
     // 发送连接测试事件
-    let _ = app_handle.emit("download-progress", serde_json::json!({
-        "status": "started",
-        "message": format!("正在连接服务器... ({})", proxy_info)
-    }));
+    let _ = app_handle.emit(
+        "download-progress",
+        serde_json::json!({
+            "status": "started",
+            "message": format!("正在连接服务器... ({})", proxy_info)
+        }),
+    );
 
     println!("开始发送下载请求...");
-    let response = match client
-        .get(&download_url)
-        .send()
-        .await
-    {
+    let response = match client.get(&download_url).send().await {
         Ok(response) => {
             println!("下载请求成功，状态码: {}", response.status());
             response
-        },
+        }
         Err(e) => {
             let error_msg = format!("下载请求失败: {} ({})", e, proxy_info);
             println!("错误: {}", error_msg);
-            let _ = app_handle.emit("download-progress", serde_json::json!({
-                "status": "error",
-                "message": error_msg
-            }));
+            let _ = app_handle.emit(
+                "download-progress",
+                serde_json::json!({
+                    "status": "error",
+                    "message": error_msg
+                }),
+            );
             return Err(error_msg);
         }
     };
@@ -734,82 +963,100 @@ async fn download_nodepass(
     if !response.status().is_success() {
         let error_msg = format!("下载失败，HTTP状态: {} ({})", response.status(), proxy_info);
         println!("错误: {}", error_msg);
-        let _ = app_handle.emit("download-progress", serde_json::json!({
-            "status": "error",
-            "message": error_msg
-        }));
+        let _ = app_handle.emit(
+            "download-progress",
+            serde_json::json!({
+                "status": "error",
+                "message": error_msg
+            }),
+        );
         return Err(error_msg);
     }
 
     let total_size = response.content_length().unwrap_or(0);
     println!("文件大小: {} bytes", total_size);
-    
+
     // 发送开始下载事件
-    let _ = app_handle.emit("download-progress", serde_json::json!({
-        "status": "downloading",
-        "progress": 0,
-        "downloaded": 0,
-        "total": total_size,
-        "message": format!("开始下载... ({})", proxy_info)
-    }));
-    
+    let _ = app_handle.emit(
+        "download-progress",
+        serde_json::json!({
+            "status": "downloading",
+            "progress": 0,
+            "downloaded": 0,
+            "total": total_size,
+            "message": format!("开始下载... ({})", proxy_info)
+        }),
+    );
+
     let mut downloaded = 0u64;
     let mut stream = response.bytes_stream();
-    
+
     let mut file = match tokio::fs::File::create(&target_path).await {
         Ok(file) => {
             println!("文件创建成功: {:?}", target_path);
             file
-        },
+        }
         Err(e) => {
             let error_msg = format!("创建文件失败: {}", e);
             println!("错误: {}", error_msg);
-            let _ = app_handle.emit("download-progress", serde_json::json!({
-                "status": "error",
-                "message": error_msg
-            }));
+            let _ = app_handle.emit(
+                "download-progress",
+                serde_json::json!({
+                    "status": "error",
+                    "message": error_msg
+                }),
+            );
             return Err(error_msg);
         }
     };
 
     println!("开始下载文件内容...");
     let mut last_progress = 0u64;
-    
+
     while let Some(chunk_result) = stream.next().await {
         // 检查是否被取消
         if DOWNLOAD_CANCELLED.load(Ordering::Relaxed) {
             println!("下载被用户取消");
-            let _ = app_handle.emit("download-progress", serde_json::json!({
-                "status": "error",
-                "message": "下载已取消"
-            }));
+            let _ = app_handle.emit(
+                "download-progress",
+                serde_json::json!({
+                    "status": "error",
+                    "message": "下载已取消"
+                }),
+            );
             // 清理临时文件
             let _ = tokio::fs::remove_file(&target_path).await;
             return Err("下载已取消".to_string());
         }
-        
+
         let chunk = match chunk_result {
             Ok(chunk) => chunk,
             Err(e) => {
                 let error_msg = format!("读取数据块失败: {}", e);
                 println!("错误: {}", error_msg);
-                let _ = app_handle.emit("download-progress", serde_json::json!({
-                    "status": "error",
-                    "message": error_msg
-                }));
+                let _ = app_handle.emit(
+                    "download-progress",
+                    serde_json::json!({
+                        "status": "error",
+                        "message": error_msg
+                    }),
+                );
                 return Err(error_msg);
             }
         };
-        
+
         downloaded += chunk.len() as u64;
-        
+
         if let Err(e) = file.write_all(&chunk).await {
             let error_msg = format!("写入文件失败: {}", e);
             println!("错误: {}", error_msg);
-            let _ = app_handle.emit("download-progress", serde_json::json!({
-                "status": "error",
-                "message": error_msg
-            }));
+            let _ = app_handle.emit(
+                "download-progress",
+                serde_json::json!({
+                    "status": "error",
+                    "message": error_msg
+                }),
+            );
             return Err(error_msg);
         }
 
@@ -817,17 +1064,19 @@ async fn download_nodepass(
         if total_size > 0 {
             let progress = (downloaded * 100) / total_size;
             // 每1%或每512KB更新一次进度
-            if progress != last_progress || downloaded - (last_progress * total_size / 100) >= 512 * 1024 {
+            if progress != last_progress
+                || downloaded - (last_progress * total_size / 100) >= 512 * 1024
+            {
                 last_progress = progress;
                 println!("下载进度: {}% ({}/{})", progress, downloaded, total_size);
-                
+
                 let speed_info = if downloaded > 0 {
                     let mb_downloaded = downloaded as f64 / 1024.0 / 1024.0;
                     format!("{:.1} MB", mb_downloaded)
                 } else {
                     "0 MB".to_string()
                 };
-                
+
                 let _ = app_handle.emit("download-progress", serde_json::json!({
                     "status": "downloading",
                     "progress": progress,
@@ -841,11 +1090,14 @@ async fn download_nodepass(
             if downloaded % (1024 * 1024) == 0 {
                 let mb_downloaded = downloaded as f64 / 1024.0 / 1024.0;
                 println!("已下载: {:.1} MB", mb_downloaded);
-                let _ = app_handle.emit("download-progress", serde_json::json!({
-                    "status": "downloading",
-                    "downloaded": downloaded,
-                    "message": format!("下载中... {:.1} MB - {}", mb_downloaded, proxy_info)
-                }));
+                let _ = app_handle.emit(
+                    "download-progress",
+                    serde_json::json!({
+                        "status": "downloading",
+                        "downloaded": downloaded,
+                        "message": format!("下载中... {:.1} MB - {}", mb_downloaded, proxy_info)
+                    }),
+                );
             }
         }
     }
@@ -855,58 +1107,70 @@ async fn download_nodepass(
     if let Err(e) = file.flush().await {
         let error_msg = format!("刷新文件失败: {}", e);
         println!("错误: {}", error_msg);
-        let _ = app_handle.emit("download-progress", serde_json::json!({
-            "status": "error",
-            "message": error_msg
-        }));
+        let _ = app_handle.emit(
+            "download-progress",
+            serde_json::json!({
+                "status": "error",
+                "message": error_msg
+            }),
+        );
         return Err(error_msg);
     }
     drop(file); // 关闭文件句柄
 
     println!("开始解压文件...");
     // 发送解压开始事件
-    let _ = app_handle.emit("download-progress", serde_json::json!({
-        "status": "extracting",
-        "message": "正在从临时目录解压安装...",
-        "progress": 0
-    }));
+    let _ = app_handle.emit(
+        "download-progress",
+        serde_json::json!({
+            "status": "extracting",
+            "message": "正在从临时目录解压安装...",
+            "progress": 0
+        }),
+    );
 
     // 解压文件到安装目录
     let extract_result = extract_nodepass_archive(&target_path, &install_dir, &app_handle).await;
-    
+
     match extract_result {
         Ok(extracted_exe_path) => {
             println!("解压成功: {}", extracted_exe_path);
-            
+
             // 清理临时文件
             println!("清理临时文件: {:?}", target_path);
             if let Err(e) = tokio::fs::remove_file(&target_path).await {
                 println!("警告: 删除临时文件失败: {}", e);
                 // 不影响主流程，只记录警告
             }
-            
+
             // 发送完成事件
-            let _ = app_handle.emit("download-progress", serde_json::json!({
-                "status": "completed",
-                "message": "安装完成！临时文件已清理",
-                "path": extracted_exe_path
-            }));
+            let _ = app_handle.emit(
+                "download-progress",
+                serde_json::json!({
+                    "status": "completed",
+                    "message": "安装完成！临时文件已清理",
+                    "path": extracted_exe_path
+                }),
+            );
 
             Ok(extracted_exe_path)
         }
         Err(e) => {
             println!("解压失败: {}", e);
-            
+
             // 即使解压失败，也尝试清理临时文件
             println!("清理临时文件: {:?}", target_path);
             if let Err(cleanup_err) = tokio::fs::remove_file(&target_path).await {
                 println!("警告: 删除临时文件失败: {}", cleanup_err);
             }
-            
-            let _ = app_handle.emit("download-progress", serde_json::json!({
-                "status": "error",
-                "message": format!("解压失败: {}", e)
-            }));
+
+            let _ = app_handle.emit(
+                "download-progress",
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("解压失败: {}", e)
+                }),
+            );
             Err(e)
         }
     }
@@ -930,7 +1194,7 @@ async fn open_directory(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("打开目录失败: {}", e))?;
     }
-    
+
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
@@ -938,7 +1202,7 @@ async fn open_directory(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("打开目录失败: {}", e))?;
     }
-    
+
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
@@ -946,7 +1210,7 @@ async fn open_directory(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("打开目录失败: {}", e))?;
     }
-    
+
     Ok(())
 }
 
@@ -954,7 +1218,9 @@ async fn open_directory(path: String) -> Result<(), String> {
 async fn show_window(app_handle: AppHandle) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
         window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
-        window.set_focus().map_err(|e| format!("聚焦窗口失败: {}", e))?;
+        window
+            .set_focus()
+            .map_err(|e| format!("聚焦窗口失败: {}", e))?;
     }
     Ok(())
 }
@@ -977,8 +1243,23 @@ async fn get_running_tunnels_count(state: tauri::State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
+async fn show_exit_confirmation(app_handle: AppHandle) -> Result<bool, String> {
+    // 获取所有运行中的隧道
+    let running_tunnels = {
+        if let Ok(processes) = app_handle.state::<AppState>().processes.lock() {
+            processes.len()
+        } else {
+            0
+        }
+    };
+
+    // 如果有运行中的隧道，返回 true 表示需要确认
+    Ok(running_tunnels > 0)
+}
+
+#[tauri::command]
 async fn exit_app(app_handle: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    // 停止所有进程
+    // 获取所有运行中的进程
     let process_ids: Vec<u32> = {
         if let Ok(processes_guard) = state.processes.lock() {
             processes_guard.keys().cloned().collect()
@@ -986,32 +1267,111 @@ async fn exit_app(app_handle: AppHandle, state: tauri::State<'_, AppState>) -> R
             Vec::new()
         }
     };
-    
-    for process_id in process_ids {
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            let _ = std::process::Command::new("taskkill")
-                .args(&["/F", "/PID", &process_id.to_string()])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .output();
-        }
+
+    if !process_ids.is_empty() {
+        println!("应用退出时检测到 {} 个运行中的隧道进程，正在停止...", process_ids.len());
         
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = std::process::Command::new("kill")
-                .args(&["-9", &process_id.to_string()])
-                .output();
+        // 发送日志事件到前端
+        let _ = app_handle.emit(
+            "app-log",
+            serde_json::json!({
+                "level": "info",
+                "message": format!("应用退出时检测到 {} 个运行中的隧道进程，正在停止...", process_ids.len()),
+                "source": "ExitHandler"
+            }),
+        );
+
+        // 停止所有进程
+        for process_id in &process_ids {
+            println!("正在停止进程 PID: {}", process_id);
+            
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                let result = std::process::Command::new("taskkill")
+                    .args(&["/F", "/PID", &process_id.to_string()])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .output();
+                
+                match result {
+                    Ok(output) => {
+                        if output.status.success() {
+                            println!("成功停止进程 PID: {}", process_id);
+                        } else {
+                            println!("停止进程 PID: {} 失败: {}", process_id, String::from_utf8_lossy(&output.stderr));
+                        }
+                    }
+                    Err(e) => {
+                        println!("执行 taskkill 失败: {}", e);
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                let result = std::process::Command::new("kill")
+                    .args(&["-9", &process_id.to_string()])
+                    .output();
+                
+                match result {
+                    Ok(output) => {
+                        if output.status.success() {
+                            println!("成功停止进程 PID: {}", process_id);
+                        } else {
+                            println!("停止进程 PID: {} 失败: {}", process_id, String::from_utf8_lossy(&output.stderr));
+                        }
+                    }
+                    Err(e) => {
+                        println!("执行 kill 失败: {}", e);
+                    }
+                }
+            }
         }
+
+        // 发送所有隧道已停止的日志
+        let _ = app_handle.emit(
+            "app-log",
+            serde_json::json!({
+                "level": "info",
+                "message": format!("已停止所有 {} 个隧道进程，应用即将退出", process_ids.len()),
+                "source": "ExitHandler"
+            }),
+        );
+
+        // 发送隧道状态更新事件，通知前端更新所有隧道状态为已停止
+        let _ = app_handle.emit(
+            "all-tunnels-stopped",
+            serde_json::json!({
+                "message": "所有隧道已停止",
+                "stopped_count": process_ids.len()
+            }),
+        );
+
+        println!("已停止所有 {} 个隧道进程，应用即将退出", process_ids.len());
+    } else {
+        println!("应用退出时没有运行中的隧道进程");
+        
+        // 发送日志事件到前端
+        let _ = app_handle.emit(
+            "app-log",
+            serde_json::json!({
+                "level": "info",
+                "message": "应用退出时没有运行中的隧道进程",
+                "source": "ExitHandler"
+            }),
+        );
     }
-    
+
     // 退出应用
     app_handle.exit(0);
     Ok(())
 }
 
 #[tauri::command]
-async fn update_tray_tooltip(_app_handle: AppHandle, _state: tauri::State<'_, AppState>) -> Result<(), String> {
+async fn update_tray_tooltip(
+    _app_handle: AppHandle,
+    _state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     // 这个函数暂时保留为空，因为托盘tooltip的更新逻辑比较复杂
     // 可以在后续版本中实现动态更新托盘提示信息的功能
     Ok(())
@@ -1025,26 +1385,26 @@ async fn set_window_theme(app_handle: AppHandle, _theme: String) -> Result<(), S
             // 基于Tauri v2官方文档，设置窗口主题为深色
             // 这将确保系统框颜色为深色，对应#131B2C的深色主题
             let _ = window.set_theme(Some(tauri::Theme::Dark));
-            
+
             // 可选：设置窗口装饰（如果需要自定义标题栏）
             // let _ = window.set_decorations(false);
-            
+
             // 可选：设置窗口阴影
             // let _ = window.set_shadow(true);
         }
-        
+
         #[cfg(target_os = "macos")]
         {
             // macOS平台也设置深色主题
             let _ = window.set_theme(Some(tauri::Theme::Dark));
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             // Linux平台设置深色主题
             let _ = window.set_theme(Some(tauri::Theme::Dark));
         }
-        
+
         Ok(())
     } else {
         Err("窗口未找到".to_string())
@@ -1057,14 +1417,14 @@ async fn initialize_window_theme(app_handle: AppHandle) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
         // 设置为深色主题，确保系统框颜色为深色（对应#131B2C的深色标题栏）
         let _ = window.set_theme(Some(tauri::Theme::Dark));
-        
+
         #[cfg(target_os = "windows")]
         {
             // Windows特定的窗口设置
             // 确保窗口使用深色标题栏
             let _ = window.set_theme(Some(tauri::Theme::Dark));
         }
-        
+
         Ok(())
     } else {
         Err("窗口未找到".to_string())
@@ -1079,7 +1439,6 @@ async fn request_close(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// 新增：获取应用版本信息的函数
 #[tauri::command]
 async fn get_app_version() -> Result<String, String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
@@ -1097,7 +1456,7 @@ async fn open_url_in_default_browser(url: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("打开浏览器失败: {}", e))?;
     }
-    
+
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
@@ -1105,7 +1464,7 @@ async fn open_url_in_default_browser(url: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("打开浏览器失败: {}", e))?;
     }
-    
+
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
@@ -1113,8 +1472,33 @@ async fn open_url_in_default_browser(url: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("打开浏览器失败: {}", e))?;
     }
-    
+
     Ok(())
+}
+
+#[tauri::command]
+fn minimize_window(window: Window) {
+    let _ = window.minimize();
+}
+
+#[tauri::command]
+fn maximize_window(window: Window) {
+    let _ = window.maximize();
+}
+
+#[tauri::command]
+fn unmaximize_window(window: Window) {
+    let _ = window.unmaximize();
+}
+
+#[tauri::command]
+fn close_window(window: Window) {
+    let _ = window.close();
+}
+
+#[tauri::command]
+fn is_maximized(window: Window) -> bool {
+    window.is_maximized().unwrap_or(false)
 }
 
 fn load_configs(config_file: &PathBuf) -> Result<Vec<NodePassConfig>, Box<dyn std::error::Error>> {
@@ -1147,7 +1531,7 @@ fn find_nodepass_executable() -> Option<String> {
             }
         }
     }
-    
+
     // 3. 检查当前目录（开发环境）
     if let Ok(current_dir) = std::env::current_dir() {
         let current_dir_exe = current_dir.join("nodepass.exe");
@@ -1173,16 +1557,19 @@ fn find_nodepass_executable_with_handle(app_handle: &AppHandle) -> Option<String
             }
         }
     }
-    
+
     // 2. 检查应用资源目录（生产环境）
-    if let Ok(resource_path) = app_handle.path().resolve("nodepass.exe", tauri::path::BaseDirectory::Resource) {
+    if let Ok(resource_path) = app_handle
+        .path()
+        .resolve("nodepass.exe", tauri::path::BaseDirectory::Resource)
+    {
         println!("检查资源目录: {:?}", resource_path);
         if resource_path.exists() {
             println!("在资源目录找到 nodepass.exe: {:?}", resource_path);
             return Some(resource_path.to_string_lossy().to_string());
         }
     }
-    
+
     // 3. 检查PATH环境变量
     if let Ok(path) = std::env::var("PATH") {
         for dir in path.split(';') {
@@ -1193,7 +1580,7 @@ fn find_nodepass_executable_with_handle(app_handle: &AppHandle) -> Option<String
             }
         }
     }
-    
+
     // 4. 最后检查当前工作目录（开发环境）
     if let Ok(current_dir) = std::env::current_dir() {
         let current_nodepass = current_dir.join("nodepass.exe");
@@ -1203,7 +1590,7 @@ fn find_nodepass_executable_with_handle(app_handle: &AppHandle) -> Option<String
             return Some(current_nodepass.to_string_lossy().to_string());
         }
     }
-    
+
     println!("未找到 nodepass.exe");
     None
 }
@@ -1224,14 +1611,17 @@ fn extract_version_from_output(output: &str) -> Option<String> {
 }
 
 fn build_nodepass_command(config: &NodePassConfig) -> Result<Vec<String>, String> {
-    let mut url = format!("{}://{}/{}", config.mode, config.tunnel_addr, config.target_addr);
-    
+    let mut url = format!(
+        "{}://{}/{}",
+        config.mode, config.tunnel_addr, config.target_addr
+    );
+
     let mut params = Vec::new();
     params.push(format!("log={}", config.log_level));
-    
+
     if config.mode != "client" {
         params.push(format!("tls={}", config.tls_mode));
-        
+
         if config.tls_mode == "2" {
             if let Some(cert) = &config.cert_file {
                 if !cert.is_empty() {
@@ -1245,12 +1635,12 @@ fn build_nodepass_command(config: &NodePassConfig) -> Result<Vec<String>, String
             }
         }
     }
-    
+
     if !params.is_empty() {
         url.push('?');
         url.push_str(&params.join("&"));
     }
-    
+
     Ok(vec![url])
 }
 
@@ -1260,12 +1650,13 @@ async fn extract_nodepass_archive(
     extract_to: &PathBuf,
     app_handle: &AppHandle,
 ) -> Result<String, String> {
-    let filename = archive_path.file_name()
+    let filename = archive_path
+        .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    
+
     println!("解压文件: {} 到目录: {:?}", filename, extract_to);
-    
+
     let result = if filename.ends_with(".tar.gz") || filename.ends_with(".tgz") {
         // 处理 .tar.gz 格式
         extract_tar_gz(archive_path, extract_to, app_handle).await
@@ -1275,7 +1666,7 @@ async fn extract_nodepass_archive(
     } else {
         Err(format!("不支持的压缩包格式: {}", filename))
     };
-    
+
     match &result {
         Ok(exe_path) => {
             println!("解压成功: {}", exe_path);
@@ -1284,7 +1675,7 @@ async fn extract_nodepass_archive(
             println!("解压失败: {}", e);
         }
     }
-    
+
     result
 }
 
@@ -1294,84 +1685,95 @@ async fn extract_tar_gz(
     extract_to: &PathBuf,
     app_handle: &AppHandle,
 ) -> Result<String, String> {
-    let file = std::fs::File::open(archive_path)
-        .map_err(|e| format!("打开压缩包失败: {}", e))?;
-    
+    let file = std::fs::File::open(archive_path).map_err(|e| format!("打开压缩包失败: {}", e))?;
+
     let decoder = GzDecoder::new(file);
     let mut archive = Archive::new(decoder);
-    
-    let entries = archive.entries()
+
+    let entries = archive
+        .entries()
         .map_err(|e| format!("读取压缩包条目失败: {}", e))?;
-    
+
     let mut extracted_exe_path = None;
     let mut file_count = 0;
     let mut total_files = 0;
-    
+
     // 先计算总文件数
-    let file_for_count = std::fs::File::open(archive_path)
-        .map_err(|e| format!("打开压缩包失败: {}", e))?;
+    let file_for_count =
+        std::fs::File::open(archive_path).map_err(|e| format!("打开压缩包失败: {}", e))?;
     let decoder_for_count = GzDecoder::new(file_for_count);
     let mut archive_for_count = Archive::new(decoder_for_count);
-    
-    for entry in archive_for_count.entries().map_err(|e| format!("读取压缩包失败: {}", e))? {
+
+    for entry in archive_for_count
+        .entries()
+        .map_err(|e| format!("读取压缩包失败: {}", e))?
+    {
         if entry.is_ok() {
             total_files += 1;
         }
     }
-    
+
     println!("压缩包中共有 {} 个文件", total_files);
-    
+
     // 重新打开文件进行解压
-    let file = std::fs::File::open(archive_path)
-        .map_err(|e| format!("重新打开压缩包失败: {}", e))?;
+    let file =
+        std::fs::File::open(archive_path).map_err(|e| format!("重新打开压缩包失败: {}", e))?;
     let decoder = GzDecoder::new(file);
     let mut archive = Archive::new(decoder);
-    
-    for entry in archive.entries().map_err(|e| format!("读取压缩包条目失败: {}", e))? {
+
+    for entry in archive
+        .entries()
+        .map_err(|e| format!("读取压缩包条目失败: {}", e))?
+    {
         let mut entry = entry.map_err(|e| format!("读取条目失败: {}", e))?;
-        
+
         file_count += 1;
-        
+
         // 先获取路径信息，避免借用冲突
-        let path = entry.path().map_err(|e| format!("获取文件路径失败: {}", e))?;
-        let file_name = path.file_name()
+        let path = entry
+            .path()
+            .map_err(|e| format!("获取文件路径失败: {}", e))?;
+        let file_name = path
+            .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("")
             .to_string(); // 转换为owned string
-        
+
         let is_dir = entry.header().entry_type().is_dir();
         let outpath = extract_to.join(&*path);
-        
+
         println!("解压文件: {}", file_name);
-        
+
         // 发送解压进度
         let progress = if total_files > 0 {
             (file_count * 100) / total_files
         } else {
             0
         };
-        
-        let _ = app_handle.emit("download-progress", serde_json::json!({
-            "status": "extracting",
-            "message": format!("正在解压... {}/{} ({})", file_count, total_files, file_name),
-            "progress": progress
-        }));
-        
+
+        let _ = app_handle.emit(
+            "download-progress",
+            serde_json::json!({
+                "status": "extracting",
+                "message": format!("正在解压... {}/{} ({})", file_count, total_files, file_name),
+                "progress": progress
+            }),
+        );
+
         if is_dir {
             // 创建目录
-            std::fs::create_dir_all(&outpath)
-                .map_err(|e| format!("创建目录失败: {}", e))?;
+            std::fs::create_dir_all(&outpath).map_err(|e| format!("创建目录失败: {}", e))?;
         } else {
             // 创建父目录
             if let Some(parent) = outpath.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("创建父目录失败: {}", e))?;
+                std::fs::create_dir_all(parent).map_err(|e| format!("创建父目录失败: {}", e))?;
             }
-            
+
             // 解压文件
-            entry.unpack(&outpath)
+            entry
+                .unpack(&outpath)
                 .map_err(|e| format!("解压文件失败: {}", e))?;
-            
+
             // 检查是否是nodepass.exe
             if file_name == "nodepass.exe" {
                 extracted_exe_path = Some(outpath.to_string_lossy().to_string());
@@ -1379,7 +1781,7 @@ async fn extract_tar_gz(
             }
         }
     }
-    
+
     extracted_exe_path.ok_or_else(|| "压缩包中未找到nodepass.exe文件".to_string())
 }
 
@@ -1389,59 +1791,58 @@ async fn extract_zip(
     extract_to: &PathBuf,
     app_handle: &AppHandle,
 ) -> Result<String, String> {
-    let file = std::fs::File::open(archive_path)
-        .map_err(|e| format!("打开压缩包失败: {}", e))?;
-    
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("读取压缩包失败: {}", e))?;
-    
+    let file = std::fs::File::open(archive_path).map_err(|e| format!("打开压缩包失败: {}", e))?;
+
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("读取压缩包失败: {}", e))?;
+
     let total_files = archive.len();
     let mut extracted_exe_path = None;
-    
+
     for i in 0..total_files {
-        let mut file = archive.by_index(i)
+        let mut file = archive
+            .by_index(i)
             .map_err(|e| format!("读取压缩包条目失败: {}", e))?;
-        
+
         let outpath = match file.enclosed_name() {
             Some(path) => extract_to.join(path),
             None => continue,
         };
-        
+
         // 发送解压进度
         let progress = ((i + 1) * 100) / total_files;
-        let _ = app_handle.emit("download-progress", serde_json::json!({
-            "status": "extracting",
-            "message": format!("正在解压... {}/{}", i + 1, total_files),
-            "progress": progress
-        }));
-        
+        let _ = app_handle.emit(
+            "download-progress",
+            serde_json::json!({
+                "status": "extracting",
+                "message": format!("正在解压... {}/{}", i + 1, total_files),
+                "progress": progress
+            }),
+        );
+
         if file.name().ends_with('/') {
             // 创建目录
-            std::fs::create_dir_all(&outpath)
-                .map_err(|e| format!("创建目录失败: {}", e))?;
+            std::fs::create_dir_all(&outpath).map_err(|e| format!("创建目录失败: {}", e))?;
         } else {
             // 创建父目录
             if let Some(p) = outpath.parent() {
                 if !p.exists() {
-                    std::fs::create_dir_all(p)
-                        .map_err(|e| format!("创建父目录失败: {}", e))?;
+                    std::fs::create_dir_all(p).map_err(|e| format!("创建父目录失败: {}", e))?;
                 }
             }
-            
+
             // 解压文件
-            let mut outfile = std::fs::File::create(&outpath)
-                .map_err(|e| format!("创建文件失败: {}", e))?;
-            
-            std::io::copy(&mut file, &mut outfile)
-                .map_err(|e| format!("解压文件失败: {}", e))?;
-            
+            let mut outfile =
+                std::fs::File::create(&outpath).map_err(|e| format!("创建文件失败: {}", e))?;
+
+            std::io::copy(&mut file, &mut outfile).map_err(|e| format!("解压文件失败: {}", e))?;
+
             // 检查是否是nodepass.exe
             if file.name().ends_with("nodepass.exe") || file.name() == "nodepass.exe" {
                 extracted_exe_path = Some(outpath.to_string_lossy().to_string());
             }
         }
     }
-    
+
     extracted_exe_path.ok_or_else(|| "压缩包中未找到nodepass.exe文件".to_string())
 }
 
@@ -1453,13 +1854,13 @@ fn detect_system_proxy() -> Option<String> {
             return Some(http_proxy);
         }
     }
-    
+
     if let Ok(https_proxy) = std::env::var("HTTPS_PROXY") {
         if !https_proxy.is_empty() {
             return Some(https_proxy);
         }
     }
-    
+
     if let Ok(all_proxy) = std::env::var("ALL_PROXY") {
         if !all_proxy.is_empty() {
             return Some(all_proxy);
@@ -1493,20 +1894,20 @@ fn detect_system_proxy() -> Option<String> {
 // 检查GitHub是否在代理绕过列表中（Windows）
 #[cfg(target_os = "windows")]
 fn is_github_bypassed() -> bool {
-    use std::process::Command;
     use std::os::windows::process::CommandExt;
-    
+    use std::process::Command;
+
     // 检查IE代理绕过列表
     let output = Command::new("reg")
         .args(&[
             "query",
             "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
             "/v",
-            "ProxyOverride"
+            "ProxyOverride",
         ])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output();
-        
+
     if let Ok(output) = output {
         let output_str = String::from_utf8_lossy(&output.stdout);
         for line in output_str.lines() {
@@ -1514,34 +1915,35 @@ fn is_github_bypassed() -> bool {
                 if let Some(bypass_part) = line.split("REG_SZ").nth(1) {
                     let bypass_list = bypass_part.trim();
                     println!("代理绕过列表: {}", bypass_list);
-                    if bypass_list.contains("github.com") || 
-                       bypass_list.contains("*.github.com") ||
-                       bypass_list.contains("<local>") {
+                    if bypass_list.contains("github.com")
+                        || bypass_list.contains("*.github.com")
+                        || bypass_list.contains("<local>")
+                    {
                         return true;
                     }
                 }
             }
         }
     }
-    
+
     false
 }
 
 // Windows系统代理检测
 #[cfg(target_os = "windows")]
 fn detect_windows_proxy() -> Option<String> {
-    use std::process::Command;
     use std::os::windows::process::CommandExt;
-    
+    use std::process::Command;
+
     // 使用netsh命令检测代理设置
     let output = Command::new("netsh")
         .args(&["winhttp", "show", "proxy"])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
         .ok()?;
-    
+
     let output_str = String::from_utf8_lossy(&output.stdout);
-    
+
     // 解析输出查找代理服务器
     for line in output_str.lines() {
         if line.contains("代理服务器") || line.contains("Proxy Server") {
@@ -1557,7 +1959,7 @@ fn detect_windows_proxy() -> Option<String> {
             }
         }
     }
-    
+
     // 尝试从注册表读取IE代理设置
     detect_ie_proxy()
 }
@@ -1565,23 +1967,23 @@ fn detect_windows_proxy() -> Option<String> {
 // 检测IE代理设置（Windows）
 #[cfg(target_os = "windows")]
 fn detect_ie_proxy() -> Option<String> {
-    use std::process::Command;
     use std::os::windows::process::CommandExt;
-    
+    use std::process::Command;
+
     // 使用reg命令读取注册表
     let output = Command::new("reg")
         .args(&[
             "query",
             "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
             "/v",
-            "ProxyServer"
+            "ProxyServer",
         ])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
         .ok()?;
-    
+
     let output_str = String::from_utf8_lossy(&output.stdout);
-    
+
     for line in output_str.lines() {
         if line.contains("ProxyServer") && line.contains("REG_SZ") {
             if let Some(proxy_part) = line.split("REG_SZ").nth(1) {
@@ -1596,59 +1998,63 @@ fn detect_ie_proxy() -> Option<String> {
             }
         }
     }
-    
+
     None
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::init();
-    
+
     let app_state = AppState::new();
-    
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .manage(app_state)
         .setup(|app| {
             let app_handle = app.handle().clone();
-            
+
             // 基于Tauri v2官方文档设置窗口主题
             if let Some(window) = app.get_webview_window("main") {
                 // 设置深色主题，确保系统框颜色为深色（对应#131B2C的深色标题栏）
                 let _ = window.set_theme(Some(tauri::Theme::Dark));
-                
+
                 #[cfg(target_os = "windows")]
                 {
                     // Windows平台特定设置
                     // 确保窗口标题栏使用深色主题
                     let _ = window.set_theme(Some(tauri::Theme::Dark));
-                    
+
                     // 使用自定义标题栏，decorations已在tauri.conf.json中设置为false
                     // 自定义标题栏颜色为#131B2C，确保视觉一致性
                 }
-                
+
                 // 在窗口加载完成后再次确认主题设置
-                let window_clone = window.clone();
+                let main_window = window.clone();
                 tauri::async_runtime::spawn(async move {
                     // 等待前端加载完成
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    
+
                     // 再次确保深色主题设置
-                    let _ = window_clone.set_theme(Some(tauri::Theme::Dark));
-                    
+                    let _ = main_window.set_theme(Some(tauri::Theme::Dark));
+
                     // 发送主题初始化事件到前端
-                    let _ = window_clone.emit("window-theme-initialized", serde_json::json!({
-                        "theme": "dark",
-                        "systemFrame": "#131B2C",
-                        "decorations": false,
-                        "customTitlebar": true
-                    }));
+                    let _ = main_window.emit(
+                        "window-theme-initialized",
+                        serde_json::json!({
+                            "theme": "dark",
+                            "systemFrame": "#131B2C",
+                            "decorations": false,
+                            "customTitlebar": true
+                        }),
+                    );
                 });
             }
-            
+
             // 创建托盘菜单
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit])?;
-            
+
             // 创建托盘图标
             let _tray = TrayIconBuilder::with_id("main")
                 .tooltip("NodePass GUI - 无运行中的隧道")
@@ -1657,12 +2063,18 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {
                     match event {
-                        TrayIconEvent::Click { button, button_state, .. } => {
+                        TrayIconEvent::Click {
+                            button,
+                            button_state,
+                            ..
+                        } => {
                             match button {
                                 tauri::tray::MouseButton::Left => {
                                     if button_state == tauri::tray::MouseButtonState::Up {
                                         // 左键单击显示窗口
-                                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                                        if let Some(window) =
+                                            tray.app_handle().get_webview_window("main")
+                                        {
                                             let _ = window.show();
                                             let _ = window.set_focus();
                                         }
@@ -1689,7 +2101,11 @@ pub fn run() {
                                 // 退出应用
                                 let app_handle_clone = app_handle.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = exit_app(app_handle_clone.clone(), app_handle_clone.state::<AppState>()).await;
+                                    let _ = exit_app(
+                                        app_handle_clone.clone(),
+                                        app_handle_clone.state::<AppState>(),
+                                    )
+                                    .await;
                                 });
                             }
                             _ => {}
@@ -1697,7 +2113,7 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-            
+
             // 监听窗口关闭事件
             let main_window = app.get_webview_window("main").unwrap();
             main_window.on_window_event(move |event| {
@@ -1705,18 +2121,19 @@ pub fn run() {
                     WindowEvent::CloseRequested { api, .. } => {
                         // 阻止默认关闭行为
                         api.prevent_close();
-                        
+
                         // 发送关闭确认事件到前端
                         let _ = app_handle.emit("close-requested", ());
                     }
                     _ => {}
                 }
             });
-            
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             start_nodepass,
+            handle_fatal_error,
             stop_nodepass_by_pid,
             stop_all_nodepass,
             get_tunnel_logs,
@@ -1730,13 +2147,19 @@ pub fn run() {
             show_window,
             hide_window,
             get_running_tunnels_count,
+            show_exit_confirmation,
             exit_app,
             update_tray_tooltip,
             set_window_theme,
             initialize_window_theme,
             request_close,
             get_app_version,
-            open_url_in_default_browser
+            open_url_in_default_browser,
+            minimize_window,
+            maximize_window,
+            unmaximize_window,
+            close_window,
+            is_maximized
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -11,7 +11,7 @@ interface LogsPageProps {
   // 移除 onRegisterRefresh 属性
 }
 
-const LogsPage: React.FC<LogsPageProps> = () => {
+const SystemLogsPage: React.FC<LogsPageProps> = () => {
   const { filteredLogs, clearLogs, filterLevel, setFilterLevel, logs } = useLog()
   const [searchText, setSearchText] = useState('')
 
@@ -214,4 +214,4 @@ const LogsPage: React.FC<LogsPageProps> = () => {
   )
 }
 
-export default LogsPage 
+export default SystemLogsPage 

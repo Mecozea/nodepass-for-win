@@ -15,7 +15,6 @@ import { listen } from '@tauri-apps/api/event'
 import { useLog } from '../context/LogContext'
 import { useSettings } from '../context/SettingsContext'
 import { useTunnel } from '../context/TunnelContext'
-import LogViewer from '../components/LogViewer'
 
 const { Text } = Typography
 
@@ -115,11 +114,6 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
   const { refreshTrigger } = useTunnel()
   const [tunnels, setTunnels] = useState<TunnelConfig[]>([])
   const [loading, setLoading] = useState(false)
-  const [selectedTunnel, setSelectedTunnel] = useState<TunnelConfig | null>(null)
-  const [logModalVisible, setLogModalVisible] = useState(false)
-
-  const [tunnelLogs, setTunnelLogs] = useState<string[]>([])
-  const logContainerRef = React.useRef<HTMLDivElement>(null)
   const [stats, setStats] = useState({
     total: 0,
     running: 0,
@@ -138,20 +132,6 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
     tunnel.mode.toLowerCase().includes(searchText.toLowerCase())
   )
 
-  // 自动滚动到日志底部
-  const scrollToBottom = () => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
-    }
-  }
-
-  // 监听日志变化，自动滚动到底部
-  useEffect(() => {
-    if (logModalVisible && tunnelLogs.length > 0) {
-      setTimeout(scrollToBottom, 100)
-    }
-  }, [tunnelLogs, logModalVisible])
-
   // 监听NodePass日志
   useEffect(() => {
     const unlistenLog = listen<NodePassLogEvent>('nodepass-log', (event) => {
@@ -166,16 +146,9 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
       const currentTime = Date.now()
       const isWithinStartupPeriod = tunnelStartTime && (currentTime - tunnelStartTime) < 5000 // 5秒内
       
-      // 检测是否为致命错误（会导致隧道无法正常工作的错误）
+      // 检测是否为致命错误 - 只检测 "ERROR Resolve failed"
       const isFatalError = isError && !isWithinStartupPeriod && (
-        message.includes('missing port in address') ||
-        message.includes('dial tcp') ||
-        message.includes('connection refused') ||
-        message.includes('no such host') ||
-        message.includes('Client error:') ||
-        message.includes('Server error:') ||
-        message.includes('bind: address already in use') ||
-        message.includes('permission denied')
+        message.toLowerCase().includes('resolve failed')
       )
       
       // 如果检测到致命错误，更新隧道状态为错误
@@ -220,11 +193,6 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
         
         // 执行异步处理
         handleFatalError()
-      }
-      
-      // 如果有选中的隧道且日志模态框打开，更新日志
-      if (selectedTunnel && selectedTunnel.id === tunnel_id && logModalVisible) {
-        setTunnelLogs(prev => [...prev, message])
       }
     })
 
@@ -275,30 +243,123 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
       unlistenExit.then(fn => fn())
       unlistenError.then(fn => fn())
     }
-  }, [selectedTunnel, logModalVisible])
+  }, [])
 
   // 监听隧道状态变化
   useEffect(() => {
-    let unlisten: () => void;
+    let unlistenStatus: () => void;
+    let unlistenAppLog: () => void;
+    let unlistenAllStopped: () => void;
+    let unlistenFatalError: () => void;
+
+    // 监听致命错误事件
+    listen('fatal-error-detected', async (event) => {
+      const { tunnel_id, pid, error } = event.payload as any;
+      console.log(`检测到致命错误: 隧道 ${tunnel_id} (PID: ${pid}) - ${error}`);
+      
+      try {
+        // 调用后端处理致命错误
+        await invoke('handle_fatal_error', {
+          tunnelId: tunnel_id,
+          processId: pid,
+          errorMessage: error
+        });
+        
+        addLog('error', `隧道 ${tunnel_id} 检测到致命错误并已自动停止: ${error}`, 'FatalErrorHandler');
+      } catch (handleError) {
+        console.error('处理致命错误失败:', handleError);
+        addLog('error', `处理致命错误失败: ${handleError}`, 'FatalErrorHandler');
+      }
+    }).then(fn => {
+      unlistenFatalError = fn;
+    });
 
     // 监听隧道状态变化
-    listen('tunnel-status-changed', (event) => {
-      const { tunnel_id, status, process_id } = event.payload as any;
-      setTunnels(prev => prev.map(t => 
-        t.id === tunnel_id 
-          ? { ...t, status, processId: process_id }
-          : t
-      ));
+    listen('tunnel-status-changed', async (event) => {
+      const { tunnel_id, status, process_id, exit_code, error } = event.payload as any;
+      console.log(`隧道状态变化: ${tunnel_id} -> ${status}`, { process_id, exit_code, error });
+      
+      try {
+        // 更新配置文件中的隧道状态
+        await configManager.updateTunnel(tunnel_id, { 
+          status: status,
+          processId: process_id || undefined
+        });
+        
+        // 更新前端状态
+        setTunnels(prev => prev.map(t => 
+          t.id === tunnel_id 
+            ? { ...t, status, processId: process_id || undefined }
+            : t
+        ));
+        
+        // 记录日志
+        if (status === 'stopped') {
+          if (exit_code !== undefined) {
+            addLog('info', `隧道 ${tunnel_id} 已停止，退出码: ${exit_code}`, 'TunnelManagement');
+          } else {
+            addLog('info', `隧道 ${tunnel_id} 已停止`, 'TunnelManagement');
+          }
+        } else if (status === 'error') {
+          addLog('error', `隧道 ${tunnel_id} 发生错误: ${error || '未知错误'}`, 'TunnelManagement');
+        }
+        
+        // 重新加载隧道列表以确保状态同步
+        loadTunnels();
+      } catch (updateError) {
+        console.error('更新隧道状态失败:', updateError);
+        addLog('error', `更新隧道状态失败: ${updateError}`, 'TunnelManagement');
+      }
     }).then(fn => {
-      unlisten = fn;
+      unlistenStatus = fn;
+    });
+
+    // 监听应用日志事件
+    listen('app-log', (event) => {
+      const { level, message, source } = event.payload as any;
+      console.log(`[${source}] ${level.toUpperCase()}: ${message}`);
+      addLog(level, message, source);
+    }).then(fn => {
+      unlistenAppLog = fn;
+    });
+
+    // 监听所有隧道停止事件
+    listen('all-tunnels-stopped', async (event) => {
+      const { message: logMessage, stopped_count } = event.payload as any;
+      console.log(`所有隧道已停止: ${logMessage}, 停止数量: ${stopped_count}`);
+      addLog('info', `${logMessage}, 停止数量: ${stopped_count}`, 'ExitHandler');
+      
+      // 更新所有隧道状态为已停止
+      try {
+        const currentTunnels = configManager.getTunnels();
+        for (const tunnel of currentTunnels) {
+          if (tunnel.status === 'running') {
+            await configManager.updateTunnel(tunnel.id, { 
+              status: 'stopped',
+              processId: undefined
+            });
+          }
+        }
+        // 重新加载隧道列表以反映状态变化
+        loadTunnels();
+        addLog('info', '所有隧道状态已更新为已停止', 'TunnelManagement');
+      } catch (error) {
+        console.error('更新隧道状态失败:', error);
+        addLog('error', `更新隧道状态失败: ${error}`, 'TunnelManagement');
+      }
+    }).then(fn => {
+      unlistenAllStopped = fn;
     });
 
     return () => {
-      unlisten?.();
+      unlistenStatus?.();
+      unlistenAppLog?.();
+      unlistenAllStopped?.();
+      unlistenFatalError?.();
     };
-  }, []);
+  }, [addLog]);
 
-  // 加载隧道列表
+    // 加载隧道列表
   const loadTunnels = async () => {
     setLoading(true)
     try {
@@ -323,7 +384,11 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
   // 组件挂载时加载数据
   useEffect(() => {
     loadTunnels()
-  }, [])
+
+    return () => {
+      // 清理函数，如果有其他监听器需要清理，可以在这里添加
+    }
+  }, [tunnels])
 
   // 监听刷新触发器
   useEffect(() => {
@@ -449,25 +514,6 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
     }
   }
 
-  // 查看日志
-  const handleViewLogs = async (tunnel: TunnelConfig) => {
-    setSelectedTunnel(tunnel)
-    setTunnelLogs([]) // 清空之前的日志
-    
-    // 如果隧道正在运行，获取历史日志
-    if (tunnel.status === 'running' && tunnel.processId) {
-      try {
-        const logs = await invoke<string[]>('get_tunnel_logs', { processId: tunnel.processId })
-        setTunnelLogs(logs)
-      } catch (error) {
-        console.error('获取隧道日志失败:', error)
-        addLog('error', `获取隧道日志失败: ${error}`, 'TunnelManagement')
-      }
-    }
-    
-    setLogModalVisible(true)
-  }
-
   // 格式化时间
   const formatDateTime = (dateString: string) => {
     const date = new Date(dateString)
@@ -495,6 +541,18 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
       default:
         return <Tag style={{ margin: 0 }}>未知</Tag>
     }
+  }
+
+  // 添加查看日志的处理函数
+  const handleViewLogs = (tunnel: TunnelConfig) => {
+    console.log('导航到隧道详情页面:', `/tunnels/${tunnel.id}/details`)
+    navigate(`/tunnels/${tunnel.id}/details`)
+  }
+
+  // 添加隧道
+  const handleCreateTunnel = () => {
+    console.log('导航到创建隧道页面')
+    navigate('/tunnels/create')
   }
 
   // 表格列配置
@@ -559,12 +617,12 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
       width: 120,
       render: (_: any, record: TunnelConfig) => (
         <Space size="small">
-          <Tooltip title="查看日志">
+          <Tooltip title="查看详情">
             <Button
               size="small"
               type="default"
               icon={<FontAwesomeIcon icon={faEye} />}
-              onClick={() => navigate(`/tunnel/${record.id}/log`)}
+              onClick={() => handleViewLogs(record)}
               style={{ color: '#1890ff', borderColor: '#1890ff' }}
             />
           </Tooltip>
@@ -620,7 +678,7 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
   ]
 
   return (
-    <div>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* 统计卡片 - 减少间距 */}
       <Row gutter={[12, 12]} style={{ marginBottom: 20 }}>
         <Col xs={24} sm={12} lg={6}>
@@ -680,7 +738,6 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
           allowClear
           style={{ maxWidth: 400 }}
         />
-        
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Tooltip title="刷新隧道列表">
             <Button
@@ -694,7 +751,7 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
           <Button
             type="primary"
             icon={<FontAwesomeIcon icon={faPlus} />}
-            onClick={() => navigate('/create-tunnel')}
+            onClick={() => navigate('/tunnels/create')}
             style={{
               backgroundColor: '#1890ff',
               borderColor: '#1890ff',
@@ -714,8 +771,6 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
               <FontAwesomeIcon icon={faList} /> 
             </Radio.Button>
           </Radio.Group>
-          
-       
         </div>
       </div>
 
@@ -804,12 +859,12 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
 
                 {/* 右侧：操作按钮 */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Tooltip title="查看日志">
+                  <Tooltip title="查看详情">
                     <Button
                       size="small"
                       type="default"
                       icon={<FontAwesomeIcon icon={faEye} />}
-                      onClick={() => navigate(`/tunnel/${tunnel.id}/log`)}
+                      onClick={() => handleViewLogs(tunnel)}
                       style={{ color: '#1890ff', borderColor: '#1890ff' }}
                     />
                   </Tooltip>
@@ -879,97 +934,6 @@ const TunnelManagement: React.FC<TunnelManagementProps> = () => {
           }}
         />
       )}
-
-      {/* 日志查看模态框 */}
-      <Modal
-        title={
-          <Space>
-            <FontAwesomeIcon icon={faEye} />
-            <span>隧道日志 - {selectedTunnel?.name}</span>
-          </Space>
-        }
-        open={logModalVisible}
-        onCancel={() => setLogModalVisible(false)}
-        footer={[
-          <Button key="clear" onClick={() => setTunnelLogs([])}>
-            清空日志
-          </Button>,
-          <Button key="close" onClick={() => setLogModalVisible(false)}>
-            关闭
-          </Button>
-        ]}
-        width={800}
-        style={{ top: 20 }}
-        bodyStyle={{ 
-          maxHeight: 'calc(100vh - 200px)', 
-          overflowY: 'auto',
-          padding: '16px'
-        }}
-      >
-        <div 
-          ref={logContainerRef}
-          style={{ 
-            backgroundColor: '#1e1e1e',
-            color: '#d4d4d4',
-            fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
-            fontSize: '12px',
-            padding: '16px',
-            borderRadius: '4px',
-            minHeight: '400px',
-            maxHeight: '500px',
-            overflowY: 'auto'
-          }}
-        >
-          {tunnelLogs.length === 0 ? (
-            <div style={{ 
-              textAlign: 'center', 
-              color: '#888',
-              marginTop: '100px',
-              fontSize: '14px'
-            }}>
-              暂无日志输出
-              <br />
-              <Text type="secondary" style={{ fontSize: '12px' }}>
-                {selectedTunnel?.status === 'running' ? '等待日志输出...' : '启动隧道后将显示实时日志'}
-              </Text>
-            </div>
-          ) : (
-            <div>
-              {tunnelLogs.map((log, index) => (
-                <div 
-                  key={index}
-                  style={{ 
-                    padding: '2px 0',
-                    color: log.includes('[ERROR]') ? '#ff6b6b' : 
-                          log.includes('[WARN]') ? '#ffa726' :
-                          log.includes('[INFO]') ? '#66bb6a' : '#d4d4d4',
-                    lineHeight: '1.4'
-                  }}
-                >
-                  <span style={{ color: '#888', marginRight: '8px' }}>
-                    [{String(index + 1).padStart(3, '0')}]
-                  </span>
-                  {log}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        
-        {selectedTunnel && selectedTunnel.status === 'running' && (
-          <div style={{ 
-            marginTop: '12px',
-            padding: '8px 12px',
-            backgroundColor: '#f0f9ff',
-            border: '1px solid #bae6fd',
-            borderRadius: '4px',
-            fontSize: '12px',
-            color: '#0369a1'
-          }}>
-            💡 提示：隧道正在运行中，日志将实时更新
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }

@@ -40,10 +40,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       onClick: () => navigate('/tunnels'),
     },
     {
-      key: '/logs',
+      key: '/system-logs',
       icon: <FontAwesomeIcon icon={faFileAlt} />,
       label: '日志',
-      onClick: () => navigate('/logs'),
+      onClick: () => navigate('/system-logs'),
     },
     {
       key: '/settings',

@@ -138,7 +138,7 @@ const TunnelLog: React.FC = () => {
             返回
           </Button>
           <Typography.Title level={4} style={{ margin: 0 }}>
-            {tunnel?.name} - 日志
+            {tunnel?.name} - 隧道日志
           </Typography.Title>
         </Space>
         

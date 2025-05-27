@@ -1,12 +1,12 @@
 import React, { useState } from 'react'
-import { Card, Button, Form, Input, Select, Space, message, Row, Col, Modal, Radio } from 'antd'
+import { Card, Button, Form, Input, Select, Space, message, Row, Col, Modal } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import {
   CheckCircleOutlined,
   CopyOutlined,
 } from '@ant-design/icons'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faServer, faDesktop, faGear } from '@fortawesome/free-solid-svg-icons'
+import { faServer, faDesktop } from '@fortawesome/free-solid-svg-icons'
 import { configManager } from '../utils/config'
 import { invoke } from '@tauri-apps/api/core'
 import { useLog } from '../context/LogContext'
@@ -34,7 +34,6 @@ const CreateTunnel: React.FC = () => {
   const [form] = Form.useForm()
   const [selectedMode, setSelectedMode] = useState<'server' | 'client'>('server')
   const [showConfirmModal, setShowConfirmModal] = useState(false)
-  const [tlsEnvConfig, setTlsEnvConfig] = useState<string>('')
   const [config, setConfig] = useState<CreateTunnelForm>({
     mode: 'server',
     name: '',
