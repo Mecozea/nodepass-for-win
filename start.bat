@@ -25,6 +25,16 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+REM 检查 pnpm
+where pnpm >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ❌ 未找到 pnpm，请先安装 pnpm
+    echo 安装命令: npm install -g pnpm
+    echo.
+    pause
+    exit /b 1
+)
+
 REM 检查 Rust
 where cargo >nul 2>&1
 if %errorlevel% neq 0 (
@@ -37,7 +47,7 @@ if %errorlevel% neq 0 (
 REM 检查是否安装了依赖
 if not exist "node_modules" (
     echo 📦 正在安装依赖...
-    call npm install
+    call pnpm install
     if %errorlevel% neq 0 (
         echo ❌ 依赖安装失败
         pause
@@ -56,7 +66,7 @@ echo    - 按 Ctrl+C 停止应用
 echo.
 
 REM 启动应用
-call npm run tauri dev
+call pnpm run tauri dev
 
 echo.
 echo 👋 NodePass GUI 已关闭

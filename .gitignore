@@ -29,3 +29,5 @@ src-tauri/node_modules
 src-tauri/.cargo
 
 pnpm-lock.yaml
+.cursor
+.vscode

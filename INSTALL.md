@@ -18,13 +18,18 @@
    ```
    这个脚本会：
    - 自动下载最新版本的 NodePass
-   - 安装 npm 依赖
+   - 安装 pnpm 依赖
    - 启动开发服务器
 
 ### 方法2: 手动安装
 
-#### 步骤1: 安装 Node.js
+#### 步骤1: 安装 Node.js 和 pnpm
 从 [nodejs.org](https://nodejs.org/) 下载并安装 Node.js LTS 版本。
+
+安装完成后，安装 pnpm 包管理器：
+```bash
+npm install -g pnpm
+```
 
 #### 步骤2: 安装 Rust
 从 [rustup.rs](https://rustup.rs/) 下载并安装 Rust。
@@ -39,12 +44,12 @@ cargo install tauri-cli
 
 #### 步骤4: 安装项目依赖
 ```bash
-npm install
+pnpm install
 ```
 
 #### 步骤5: 运行应用
 ```bash
-npm run tauri dev
+pnpm run tauri dev
 ```
 
 ## 🔧 开发环境设置
@@ -61,19 +66,19 @@ npm run tauri dev
 
 ```bash
 # 开发模式
-npm run tauri dev
+pnpm run tauri dev
 
 # 构建应用
-npm run tauri build
+pnpm run tauri build
 
 # 前端开发服务器
-npm run dev
+pnpm run dev
 
 # TypeScript 类型检查
-npm run type-check
+pnpm run type-check
 
 # 代码格式化
-npm run format
+pnpm run format
 ```
 
 ## 📋 系统要求
@@ -101,16 +106,16 @@ npm run format
 - 暂时禁用杀毒软件
 - 手动从 [rustup.rs](https://rustup.rs/) 下载安装
 
-#### 2. npm 依赖安装失败
-**错误**: `npm install` 失败
+#### 2. pnpm 依赖安装失败
+**错误**: `pnpm install` 失败
 **解决方案**:
 ```bash
-# 清除 npm 缓存
-npm cache clean --force
+# 清除 pnpm 缓存
+pnpm cache clean --force
 
 # 删除 node_modules 重新安装
 rmdir /s node_modules
-npm install
+pnpm install
 ```
 
 #### 3. Tauri 构建失败
@@ -147,7 +152,7 @@ npm install
 ### 构建生产版本
 
 ```bash
-npm run tauri build
+pnpm run tauri build
 ```
 
 构建完成后，可执行文件位于：
@@ -165,8 +170,8 @@ npm run tauri build
 ### 更新 NodePass GUI
 ```bash
 git pull origin main
-npm install
-npm run tauri build
+pnpm install
+pnpm run tauri build
 ```
 
 ### 更新 NodePass 核心
@@ -181,6 +186,7 @@ npm run tauri build
 - **NodePass**: 支持最新版本
 - **兼容性**: Windows 10/11 x64 
 
+```
 nodepass-win/
 ├── README.md                     # 主项目说明
 └── nodepass-gui/                 # Tauri 应用程序
@@ -191,6 +197,7 @@ nodepass-win/
     ├── start.bat               # 快速启动脚本
     ├── README.md               # 应用说明
     └── INSTALL.md              # 详细安装指南 
+```
 
 ## 核心文件部署
 
